@@ -111,7 +111,21 @@ document.addEventListener('DOMContentLoaded', async function() {
       }
     } catch (error) {
       console.error('Error exporting cards:', error);
-      alert(`Error exporting to Mochi: ${error.message}`);
+      
+      // Create more user-friendly error messages
+      let errorMessage = error.message;
+      
+      if (errorMessage.includes('unavailable')) {
+        errorMessage = 'Mochi service is currently unavailable. Please try again later.';
+      } else if (errorMessage.includes('Failed to fetch') || errorMessage.includes('Network')) {
+        errorMessage = 'Network error. Please check your internet connection and ensure the proxy server is running.';
+      } else if (errorMessage.includes('500')) {
+        errorMessage = 'Server error. Please try again later or check your API keys.';
+      } else if (errorMessage.includes('Authentication') || errorMessage.includes('401')) {
+        errorMessage = 'Authentication failed. Please check your Mochi API key.';
+      }
+      
+      alert(`Error exporting to Mochi: ${errorMessage}`);
       this.textContent = originalText;
       this.disabled = false;
     }

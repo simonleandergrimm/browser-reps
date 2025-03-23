@@ -139,20 +139,42 @@ app.post('/proxy/mochi', async (req, res) => {
 
     // Next, get the user's decks to find a valid deck ID
     console.log('Fetching user decks from Mochi...');
-    const decksResponse = await fetch('https://app.mochi.cards/api/decks/', {
-      method: 'GET',
-      headers: {
-        'Authorization': authHeader
+    let decksData;
+    
+    try {
+      const decksResponse = await fetch('https://app.mochi.cards/api/decks/', {
+        method: 'GET',
+        headers: {
+          'Authorization': authHeader
+        }
+      });
+
+      if (!decksResponse.ok) {
+        const errorText = await decksResponse.text();
+        // Check if the error is a 503 Service Unavailable
+        if (decksResponse.status === 503) {
+          throw new Error('Mochi service is currently unavailable. Please try again later.');
+        } else {
+          throw new Error(`Mochi API Error (decks): ${decksResponse.status} - ${errorText.substring(0, 100)}`);
+        }
       }
-    });
-
-    if (!decksResponse.ok) {
-      const errorText = await decksResponse.text();
-      throw new Error(`Mochi API Error (decks): ${decksResponse.status} - ${errorText}`);
+      
+      decksData = await decksResponse.json();
+      console.log(`Found ${decksData.docs?.length || 0} decks`);
+      
+    } catch (fetchError) {
+      // Handle network errors
+      if (fetchError.message.includes('service is currently unavailable')) {
+        throw fetchError; // Pass through our custom error
+      } else {
+        console.error('Error connecting to Mochi:', fetchError);
+        throw new Error('Unable to connect to Mochi. Please check your internet connection and try again later.');
+      }
     }
-
-    const decksData = await decksResponse.json();
-    console.log(`Found ${decksData.docs?.length || 0} decks`);
+    
+    if (!decksData || !decksData.docs) {
+      throw new Error('No decks were found in your Mochi account or the Mochi API returned invalid data.');
+    }
 
     // Find the first non-trashed, non-archived deck, or use the first deck as fallback
     let defaultDeckId = null;

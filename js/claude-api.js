@@ -218,13 +218,31 @@ async function exportCardsToMochi(cards) {
     
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Mochi API Error: ${response.status} - ${errorText}`);
+      
+      // Check for specific error status codes
+      if (response.status === 503) {
+        throw new Error('Mochi service is currently unavailable. Please try again later.');
+      } else if (response.status === 401 || response.status === 403) {
+        throw new Error('Authentication failed. Please check your Mochi API key in the server .env file.');
+      } else if (response.status >= 500) {
+        throw new Error('Mochi server error. Please try again later.');
+      } else {
+        // Truncate error text to a reasonable length to avoid overwhelming users
+        const truncatedError = errorText.length > 100 ? errorText.substring(0, 100) + '...' : errorText;
+        throw new Error(`Mochi API Error: ${response.status} - ${truncatedError}`);
+      }
     }
     
     const responseData = await response.json();
     return { success: true, data: responseData };
   } catch (error) {
     console.error('Error calling Mochi API:', error);
+    
+    // Improve error messages for common network issues
+    if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+      throw new Error('Network error connecting to the proxy server. Please ensure the server is running.');
+    }
+    
     throw error;
   }
 }
