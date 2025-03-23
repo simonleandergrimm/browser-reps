@@ -1,0 +1,20 @@
+.text-marker-highlight {
+  background-color: rgba(255, 255, 0, 0.3);
+  border-bottom: 1px solid #ffd700;
+  cursor: pointer;
+}
+
+#text-marker-button {
+  background-color: #4285f4;
+  color: white;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  user-select: none;
+}
+
+#text-marker-button:hover {
+  background-color: #3367d6;
+}

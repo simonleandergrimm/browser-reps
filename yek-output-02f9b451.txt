@@ -1,0 +1,4394 @@
+>>>> src/assets/footer-pattern.svg
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="600" height="150" viewBox="0 0 600 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M0 25C100 10 200 50 300 25C400 0 500 25 600 50V150H0V25Z" fill="rgba(230, 230, 255, 0.1)"/>
+  <path d="M0 50C100 35 200 75 300 50C400 25 500 50 600 75V150H0V50Z" fill="rgba(230, 230, 255, 0.05)"/>
+</svg>
+>>>> src/claude-api.js
+/**
+ * Client API for Flash Card Generator
+ *
+ * Handles client-side API key management and server API requests
+ */
+
+// Local storage key for API keys
+const API_KEY_STORAGE_KEY = "mochi_card_generator_api_keys";
+
+/**
+ * Retrieves stored API keys from local storage
+ * @returns {Object} Object containing API keys
+ */
+function getStoredApiKeys() {
+  try {
+    const storedData = localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (storedData) {
+      return JSON.parse(storedData);
+    }
+  } catch (error) {
+    console.error('Error reading stored API keys:', error);
+  }
+  return { anthropicApiKey: null, mochiApiKey: null };
+}
+
+/**
+ * Stores API keys in local storage
+ * @param {string} anthropicApiKey - Claude API key
+ * @param {string} mochiApiKey - Mochi API key
+ * @param {boolean} storeLocally - Whether to store keys locally
+ * @returns {boolean} Success status
+ */
+function storeApiKeys(anthropicApiKey, mochiApiKey, storeLocally = true) {
+  if (storeLocally) {
+    try {
+      localStorage.setItem(API_KEY_STORAGE_KEY, JSON.stringify({
+        anthropicApiKey,
+        mochiApiKeyExpor
+      }));
+      return true;
+    } catch (error) {
+      console.error('Error storing API keys:', error);
+      return false;
+    }
+  } else {
+    try {
+      localStorage.removeItem(API_KEY_STORAGE_KEY);
+    } catch (error) {
+      console.error('Error clearing API keys:', error);
+    }
+    return true;
+  }
+}
+
+/**
+ * Validates format of Anthropic API key
+ * @param {string} key - API key to validate
+ * @returns {boolean} Whether key appears valid
+ */
+function validateAnthropicApiKey(key) {
+  return key && key.startsWith('sk-ant-') && key.length > 20;
+}
+
+/**
+ * Checks if API keys are configured
+ * @returns {boolean} Whether keys are available
+ */
+function hasApiKeys() {
+  const keys = getStoredApiKeys();
+  return !!keys.anthropicApiKey;
+}
+
+/**
+ * Helper function to truncate text to a reasonable size
+ * @param {string} text - Text to truncate
+ * @param {number} maxLength - Maximum length
+ * @returns {string} Truncated text
+ */
+function truncateText(text, maxLength = 8000) {
+  if (!text || text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '... [truncated]';
+}
+
+/**
+ * Parses Claude's response to extract structured card data
+ * @param {Object} responseData - Raw response from Claude API
+ * @returns {Array} Array of card objects
+ */
+function parseClaudeResponse(responseData) {
+  let responseText = '';
+
+  // Extract text content from response
+  if (responseData.content && Array.isArray(responseData.content)) {
+    for (const item of responseData.content) {
+      if (item.type === 'text') {
+        responseText += item.text;
+      }
+    }
+  } else if (responseData.content && responseData.content[0] && responseData.content[0].text) {
+    responseText = responseData.content[0].text;
+  } else {
+    console.warn('Unexpected response format from Claude API');
+    responseText = JSON.stringify(responseData);
+  }
+
+  // Try to parse as JSON
+  try {
+    // First, extract JSON if it's embedded in other text
+    const jsonMatch = responseText.match(/(\[\s*\{.*\}\s*\])/s);
+    const jsonText = jsonMatch ? jsonMatch[1] : responseText;
+
+    const parsedCards = JSON.parse(jsonText);
+    console.log('Successfully parsed JSON cards:', parsedCards);
+
+    if (Array.isArray(parsedCards) && parsedCards.length > 0) {
+      const validCards = parsedCards.filter(card => card.front && card.back)
+        .map(card => ({
+          front: card.front,
+          back: card.back,
+          deck: card.deck || "General"
+        }));
+
+      if (validCards.length > 0) {
+        console.log('Returning valid JSON cards:', validCards);
+        return validCards;
+      }
+    }
+    console.warn('Parsed JSON did not contain valid cards');
+  } catch (error) {
+    console.warn('Failed to parse response as JSON:', error);
+
+    // Try searching for JSON inside the text (sometimes Claude wraps JSON in backticks or other text)
+    try {
+      const jsonRegex = /```(?:json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/;
+      const match = responseText.match(jsonRegex);
+      if (match && match[1]) {
+        const extractedJson = match[1];
+        const parsedCards = JSON.parse(extractedJson);
+
+        if (Array.isArray(parsedCards) && parsedCards.length > 0) {
+          const validCards = parsedCards.filter(card => card.front && card.back)
+            .map(card => ({
+              front: card.front,
+              back: card.back,
+              deck: card.deck || "General"
+            }));
+
+          if (validCards.length > 0) {
+            console.log('Returning valid JSON cards (extracted from code block):', validCards);
+            return validCards;
+          }
+        }
+      }
+    } catch (innerError) {
+      console.warn('Failed to extract JSON from code blocks:', innerError);
+    }
+  }
+
+  // Fallback: If JSON parsing fails, create a basic fallback card
+  console.warn('Could not parse any cards from Claude response, using fallback');
+  return [{
+    front: "What are the key concepts from this text?",
+    back: responseText.length > 300
+      ? responseText.substring(0, 300) + "..."
+      : responseText,
+    deck: "General"
+  }];
+}
+
+/**
+ * Analyzes text to extract key context information
+ * Returns a concise summary of the document's main points and author
+ *
+ * @param {string} text - The full text to analyze
+ * @returns {Promise<string>} - Context summary
+ */
+async function analyzeTextWithClaude(text) {
+  try {
+    // Get stored API key
+    const { anthropicApiKey } = getStoredApiKeys();
+
+    // Check if we have an API key
+    if (!anthropicApiKey) {
+      throw new Error('No Claude API key available. Please add your API key in settings.');
+    }
+
+    // Call the server endpoint
+    let response;
+    try {
+      response = await fetch('/api/analyze-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: truncateText(text, 10000),
+          userApiKey: anthropicApiKey || null
+        })
+      });
+    } catch (fetchError) {
+      throw new Error(`Network error: Could not connect to the API server. ${fetchError.message}`);
+    }
+
+    // Read the response once as text
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      try {
+        // Try to parse as JSON
+        const errorData = JSON.parse(responseText);
+        throw new Error(`API Error: ${errorData.error || 'Unknown server error'}`);
+      } catch (e) {
+        // If parsing fails, use the text directly
+        throw new Error(`API Error: ${responseText.substring(0, 100)}`);
+      }
+    }
+
+    // Parse the already-read text as JSON
+    const data = JSON.parse(responseText);
+
+    // Extract the context summary from Claude's response
+    let contextSummary = '';
+    if (data.content && Array.isArray(data.content)) {
+      for (const item of data.content) {
+        if (item.type === 'text') {
+          contextSummary += item.text;
+        }
+      }
+    }
+
+    return contextSummary;
+  } catch (error) {
+    console.error('Error analyzing text:', error);
+
+    // Provide more user-friendly error messages
+    if (error.message.includes('No API key provided')) {
+      throw new Error('Please add your Claude API key in the settings (gear icon).');
+    } else if (error.message.includes('Network error')) {
+      throw new Error('Connection to server failed. Please check your internet connection and try again.');
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Calls Claude API to generate flashcards from text
+ * Uses server-side proxy with user-provided API key
+ *
+ * @param {string} text - The highlighted text selection to create cards from
+ * @param {string} deckOptions - Comma-separated list of available deck options
+ * @param {string} textContext - Optional context summary for the document
+ * @returns {Promise<Array>} - Array of card objects with front, back, and deck properties
+ */
+async function generateCardsWithClaude(text, deckOptions = '', textContext = '') {
+  try {
+    // Get stored API key
+    const { anthropicApiKey } = getStoredApiKeys();
+
+    // Check if we have an API key
+    if (!anthropicApiKey) {
+      throw new Error('No Claude API key available. Please add your API key in settings.');
+    }
+
+    // Call the server endpoint with timeout control
+    let response;
+    try {
+      // Create an AbortController to handle timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second client-side timeout
+
+      response = await fetch('/api/generate-cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: truncateText(text),
+          textContext,
+          deckOptions,
+          userApiKey: anthropicApiKey || null
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+    } catch (fetchError) {
+      if (fetchError.name === 'AbortError') {
+        throw new Error(`Request timed out. Please select a smaller portion of text and try again.`);
+      }
+      throw new Error(`Network error: Could not connect to the API server. ${fetchError.message}`);
+    }
+
+    // Read the response once as text
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      try {
+        // Try to parse as JSON
+        const errorData = JSON.parse(responseText);
+        throw new Error(`API Error: ${errorData.error || 'Unknown server error'}`);
+      } catch (e) {
+        // If parsing fails, use the text directly
+        throw new Error(`API Error: ${responseText.substring(0, 100)}`);
+      }
+    }
+
+    // Parse the already-read text as JSON
+    const responseData = JSON.parse(responseText);
+    return parseClaudeResponse(responseData);
+  } catch (error) {
+    console.error('Error calling API:', error);
+
+    // Provide more user-friendly error messages
+    if (error.message.includes('No API key provided')) {
+      throw new Error('Please add your Claude API key in the settings (gear icon).');
+    } else if (error.message.includes('Network error') || error.message.includes('Failed to fetch')) {
+      throw new Error('Connection to server failed. Please check your internet connection and try again.');
+    } else if (error.message.includes('API Error') && error.message.length > 200) {
+      // Truncate very long error messages
+      throw new Error(error.message.substring(0, 200) + '...');
+    }
+
+    throw error;
+  }
+}
+
+export {
+  generateCardsWithClaude,
+  analyzeTextWithClaude,
+  getStoredApiKeys,
+  storeApiKeys,
+  validateAnthropicApiKey,
+  hasApiKeys
+};
+>>>> src/scripts.js
+// Import Claude API functions
+import {
+    generateCardsWithClaude,
+    analyzeTextWithClaude,
+    getStoredApiKeys,
+    storeApiKeys,
+    validateAnthropicApiKey,
+    hasApiKeys
+} from './claude-api.js';
+
+// Quill.js is loaded globally from CDN
+
+document.addEventListener('DOMContentLoaded', () => {
+    // API Key Management
+    const apiKeyModal = document.getElementById('apiKeyModal');
+    const settingsButton = document.getElementById('settingsButton');
+    const anthropicApiKeyInput = document.getElementById('anthropicApiKey');
+    const mochiApiKeyInput = document.getElementById('mochiApiKey');
+    const storeLocallyCheckbox = document.getElementById('storeLocallyCheckbox');
+    const apiKeySaveButton = document.getElementById('apiKeySave');
+    const apiKeyCancelButton = document.getElementById('apiKeyCancel');
+    const anthropicApiKeyError = document.getElementById('anthropicApiKeyError');
+
+    // Dropdown Menu
+    const menuButton = document.getElementById('menuButton');
+    const dropdownMenu = document.getElementById('dropdown-menu');
+
+    // Toggle dropdown menu when menu button is clicked
+    menuButton.addEventListener('click', () => {
+        const expanded = menuButton.getAttribute('aria-expanded') === 'true';
+
+        if (expanded) {
+            // Close dropdown
+            dropdownMenu.classList.remove('show');
+            menuButton.setAttribute('aria-expanded', 'false');
+        } else {
+            // Open dropdown
+            dropdownMenu.classList.add('show');
+            menuButton.setAttribute('aria-expanded', 'true');
+        }
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (event) => {
+        if (!menuButton.contains(event.target) && !dropdownMenu.contains(event.target)) {
+            dropdownMenu.classList.remove('show');
+            menuButton.setAttribute('aria-expanded', 'false');
+        }
+    });
+
+    // Check for stored API keys on startup
+    const storedKeys = getStoredApiKeys();
+    if (storedKeys.anthropicApiKey) {
+        // Pre-fill the form with stored keys (masked)
+        anthropicApiKeyInput.value = storedKeys.anthropicApiKey;
+        if (storedKeys.mochiApiKey) {
+            mochiApiKeyInput.value = storedKeys.mochiApiKey;
+            // Fetch decks right away if we have a Mochi API key
+            fetchDecks()
+                .catch(error => console.error('Failed to load Mochi decks on startup:', error));
+        }
+    } else {
+        // Show API key modal on startup if no API keys are stored
+        showApiKeyModal();
+    }
+
+    // Settings button opens the API key modal
+    settingsButton.addEventListener('click', showApiKeyModal);
+
+    // Save button in API key modal
+    apiKeySaveButton.addEventListener('click', async () => {
+        const anthropicKey = anthropicApiKeyInput.value.trim();
+        const mochiKey = mochiApiKeyInput.value.trim();
+        const storeLocally = storeLocallyCheckbox.checked;
+
+        // Validate the Anthropic API key
+        if (!validateAnthropicApiKey(anthropicKey)) {
+            anthropicApiKeyError.textContent = 'Required: Enter a valid Claude API key (starts with sk-ant-)';
+            anthropicApiKeyInput.focus();
+            return;
+        }
+
+        // Store the API keys
+        const saveSuccess = storeApiKeys(anthropicKey, mochiKey, storeLocally);
+
+        if (saveSuccess) {
+            // Close the modal
+            apiKeyModal.style.display = 'none';
+
+            // Update UI based on available keys
+            updateUiForApiKeys();
+
+            // Fetch decks if Mochi API key is provided
+            if (mochiKey) {
+                try {
+                    await fetchDecks();
+                    // Mochi decks successfully fetched
+                } catch (error) {
+                    console.error('Failed to fetch Mochi decks:', error);
+                    showNotification('Failed to connect to Mochi API', 'error');
+                }
+            }
+
+            // Show success notification
+            showNotification('API keys saved successfully', 'success');
+        } else {
+            // Show error notification
+            showNotification('Failed to save API keys', 'error');
+        }
+    });
+
+    // Cancel button in API key modal
+    apiKeyCancelButton.addEventListener('click', () => {
+        // If we have an Anthropic API key stored, just close the modal
+        const storedKeys = getStoredApiKeys();
+        if (storedKeys.anthropicApiKey) {
+            apiKeyModal.style.display = 'none';
+        } else {
+            // Otherwise, show a warning specifically about the required Claude API key
+            if (confirm('Without a Claude API key, you won\'t be able to generate flashcards. Do you want to continue without setting up the API key?')) {
+                apiKeyModal.style.display = 'none';
+            }
+        }
+    });
+
+    function showApiKeyModal() {
+        // Reset error message
+        anthropicApiKeyError.textContent = '';
+
+        // Fill in the form with stored values if available
+        const storedKeys = getStoredApiKeys();
+        if (storedKeys.anthropicApiKey) {
+            anthropicApiKeyInput.value = storedKeys.anthropicApiKey;
+        }
+        if (storedKeys.mochiApiKey) {
+            mochiApiKeyInput.value = storedKeys.mochiApiKey;
+        }
+
+        // Show the modal
+        apiKeyModal.style.display = 'flex';
+    }
+
+    function updateUiForApiKeys() {
+        const keys = getStoredApiKeys();
+
+        // Update export button text based on whether we have a Mochi API key
+        const exportButton = document.getElementById('exportButton');
+        if (keys.mochiApiKey) {
+            exportButton.textContent = 'Export to Mochi';
+        } else {
+            exportButton.textContent = 'Export as Markdown';
+        }
+    }
+
+    // Call this on startup to set up the UI correctly
+    updateUiForApiKeys();
+    // DOM Elements
+    const textInput = document.getElementById('textInput');
+    const generateButton = document.getElementById('generateButton');
+    const cardsContainer = document.getElementById('cardsContainer');
+    const exportButton = document.getElementById('exportButton');
+    const clearCardsButton = document.getElementById('clearCardsButton');
+    const splitterHandle = document.getElementById('splitterHandle');
+    const editorPanel = document.getElementById('editorPanel');
+    const outputPanel = document.getElementById('outputPanel');
+
+    // App State
+    const state = {
+        cards: [],
+        selectedText: '',
+        currentDeck: null,
+        decks: {},
+        documentContext: '',
+        isAnalyzing: false,
+        fromPaste: false,
+        editor: null
+    };
+
+    // Initialize Quill Editor
+    function initQuillEditor() {
+        try {
+            // Configure Quill with the modules and formats we want
+            const toolbarOptions = [
+                [{ 'header': [1, 2, 3, false] }],
+                ['bold', 'italic'],
+                [{ 'list': 'ordered'}, { 'list': 'bullet' }]
+            ];
+
+            // Create a new Quill editor instance
+            state.editor = new Quill('#textInput', {
+                modules: {
+                    toolbar: toolbarOptions
+                },
+                placeholder: 'Paste or type your text here, then highlight sections to generate cards...',
+                theme: 'snow'
+            });
+
+            // Handle text change events
+            state.editor.on('text-change', function() {
+                // Clear any existing timeout
+                if (textChangeTimeout) {
+                    clearTimeout(textChangeTimeout);
+                }
+
+                // Set a new timeout to analyze text after typing stops
+                textChangeTimeout = setTimeout(() => {
+                    // Get text content from the editor
+                    const fullText = state.editor.getText();
+                    if (fullText.trim().length > 100 && !state.isAnalyzing) {
+                        analyzeDocumentContext(fullText);
+                    }
+                }, 1500);
+            });
+
+            // Handle selection change events
+            state.editor.on('selection-change', function(range) {
+                if (range) {
+                    if (range.length > 0) {
+                        // We have a selection
+                        const selectedText = state.editor.getText(range.index, range.length);
+
+                        // Store selected text in state
+                        state.selectedText = selectedText.trim();
+
+                        // Enable generate button
+                        generateButton.disabled = false;
+
+                        // Show visual indication
+                        textInput.classList.add('has-selection');
+                    } else {
+                        // Cursor changed position but no selection
+                        state.selectedText = '';
+                        generateButton.disabled = true;
+                        textInput.classList.remove('has-selection');
+                    }
+                } else {
+                    // Editor lost focus
+                    state.selectedText = '';
+                    textInput.classList.remove('has-selection');
+                }
+            });
+
+            console.log('Quill editor initialized');
+        } catch (error) {
+            console.error('Error initializing Quill editor:', error);
+        }
+    }
+
+    // Handle selection for fallback editor
+    function handleEditorSelection() {
+        const selection = window.getSelection();
+        const selectedText = selection.toString().trim();
+
+        // Store selected text in state
+        state.selectedText = selectedText;
+
+        // Enable/disable buttons based on selection
+        const hasSelection = selectedText.length > 0;
+        generateButton.disabled = !hasSelection;
+
+        // Show a visual indication of selection
+        if (hasSelection) {
+            textInput.classList.add('has-selection');
+        } else {
+            textInput.classList.remove('has-selection');
+        }
+    }
+
+    // Fetch decks from Mochi API
+    async function fetchDecks() {
+        try {
+            // Check if we have a client-side Mochi API key
+            const { mochiApiKey } = getStoredApiKeys();
+
+            if (!mochiApiKey) {
+                // Use fallback decks when no Mochi API key is available
+                state.decks = { "General": "general" };
+                state.currentDeck = "General";
+
+                // Update export button text
+                const exportButton = document.getElementById('exportButton');
+                if (exportButton) {
+                    exportButton.textContent = 'Export as Markdown';
+                }
+
+                return;
+            }
+
+            // First try to use the server endpoint with user's API key
+            try {
+                // Pass the user's Mochi API key to the server endpoint
+                const response = await fetch(`/api/mochi-decks?userMochiKey=${encodeURIComponent(mochiApiKey)}`);
+
+                if (response.ok) {
+                    const data = await response.json();
+
+                    if (data.success && data.decks) {
+                        // Store the decks in the state
+                        state.decks = data.decks;
+
+                        // Set currentDeck to first deck in the list
+                        state.currentDeck = Object.keys(data.decks)[0] || "General";
+                        // Decks loaded successfully
+                        return;
+                    }
+                }
+            } catch (serverError) {
+                // Server-side API failed, trying client-side API next
+            }
+
+            // If server-side fails, try client-side API
+            if (mochiApiKey) {
+                // Mochi uses HTTP Basic Auth with API key followed by colon
+                const authHeader = `Basic ${btoa(`${mochiApiKey}:`)}`;
+
+                try {
+                    // Directly call Mochi API from the client
+                    const response = await fetch('https://app.mochi.cards/api/decks/', {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': authHeader
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Mochi API Error: ${await response.text()}`);
+                    }
+
+                    const decksData = await response.json();
+
+                    // Transform data for client use
+                    const formattedDecks = {};
+                    let activeDecksCount = 0;
+
+                    decksData.docs.forEach(deck => {
+                        // Skip decks that are in trash or archived
+                        if (deck['trashed?'] || deck['archived?']) {
+                            return; // Skip this deck
+                        }
+
+                        // Only include active decks
+                        activeDecksCount++;
+
+                        // Remove [[ ]] if present in the ID
+                        const cleanId = deck.id.replace(/\[\[|\]\]/g, '');
+                        formattedDecks[deck.name] = cleanId;
+                    });
+
+                    // Successfully loaded active decks from Mochi API
+
+                    // Store the decks in the state
+                    state.decks = formattedDecks;
+
+                    // Set currentDeck to first deck in the list
+                    state.currentDeck = Object.keys(formattedDecks)[0] || "General";
+
+                    // Update export button text
+                    const exportButton = document.getElementById('exportButton');
+                    if (exportButton) {
+                        exportButton.textContent = 'Export to Mochi';
+                    }
+
+                    return;
+                } catch (clientApiError) {
+                    console.error('Error using client-side Mochi API:', clientApiError);
+                }
+            }
+
+            // Create deck selector dropdown
+            createDeckSelector();
+
+        } catch (error) {
+            console.error('Error fetching decks:', error);
+            // Fallback to a simple deck structure
+            state.decks = { "General": "general" };
+            state.currentDeck = "General";
+
+            // Create deck selector with fallback
+            createDeckSelector();
+        }
+    }
+
+    // Function to show status notifications
+    function showNotification(message, type = 'info', duration = 3000) {
+        // Remove any existing notification
+        const existingNotification = document.querySelector('.status-notification');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.className = `status-notification ${type}`;
+
+        // Add icon
+        const icon = document.createElement('span');
+        icon.className = 'icon';
+        notification.appendChild(icon);
+
+        // Add message
+        const messageEl = document.createElement('span');
+        messageEl.textContent = message;
+        notification.appendChild(messageEl);
+
+        // Add to document
+        document.body.appendChild(notification);
+
+        // Show notification with animation
+        setTimeout(() => {
+            notification.classList.add('show');
+        }, 10);
+
+        // Hide after duration
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => {
+                notification.remove();
+            }, 300);
+        }, duration);
+
+        return notification;
+    }
+
+    // Event Listeners
+    generateButton.addEventListener('click', generateCardsFromSelection);
+    exportButton.addEventListener('click', exportToMochi);
+    clearCardsButton.addEventListener('click', clearAllCards);
+
+    // Initialize Quill editor
+    let textChangeTimeout = null;
+    try {
+        // Initialize the Quill editor
+        initQuillEditor();
+
+        // Quill handles paste events automatically
+        // We'll analyze text after paste in the text-change handler
+    } catch (error) {
+        console.error('Failed to initialize Quill editor, falling back to basic contenteditable', error);
+        // Fallback to basic contenteditable if Quill fails
+        textInput.setAttribute('contenteditable', 'true');
+        textInput.setAttribute('placeholder', 'Paste or type your text here, then highlight sections to generate cards...');
+
+        // Add basic event listeners
+        textInput.addEventListener('mouseup', handleEditorSelection);
+        textInput.addEventListener('keyup', handleEditorSelection);
+        textInput.addEventListener('input', () => {
+            // Clear any existing timeout
+            if (textChangeTimeout) {
+                clearTimeout(textChangeTimeout);
+            }
+
+            // Set a new timeout to analyze text after typing stops
+            textChangeTimeout = setTimeout(() => {
+                const fullText = textInput.textContent || '';
+                if (fullText.trim().length > 100 && !state.isAnalyzing) {
+                    analyzeDocumentContext(fullText);
+                }
+            }, 1500);
+        });
+
+        // Add plain text paste handler for fallback
+        textInput.addEventListener('paste', async function(e) {
+            // Prevent the default paste behavior
+            e.preventDefault();
+
+            // Get plain text from clipboard
+            const text = e.clipboardData.getData('text/plain');
+
+            // Insert it at the cursor position using the standard command
+            document.execCommand('insertText', false, text);
+
+            // If text is long enough, analyze it immediately
+            if (text.length > 100) {
+                state.fromPaste = true;
+                await analyzeDocumentContext(text);
+            }
+        });
+    }
+
+    // Enable the button if there's already text in the selection (Quill handles this now)
+    // handleTextSelection() is now replaced by Quill's selection-change event
+
+    // Initialize UI and fetch decks
+    updateButtonStates();
+
+    // Fetch decks from Mochi API on startup
+    fetchDecks().catch(error => {
+        console.error('Error initializing decks:', error);
+        // Create a fallback deck selector in case of error
+        createDeckSelector();
+    });
+
+    // We no longer need a deck selector in the main UI - we'll only show it when editing a card
+    function createDeckSelector() {
+        // Simply set the default current deck if none is set yet
+        if (!state.currentDeck && Object.keys(state.decks).length > 0) {
+            state.currentDeck = Object.keys(state.decks)[0];
+        }
+        // No UI elements to create here anymore
+    }
+
+    // Set up the resizable splitter
+    let isResizing = false;
+    let startY, startHeight;
+
+    splitterHandle.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startY = e.clientY;
+        startHeight = editorPanel.offsetHeight;
+
+        document.documentElement.style.cursor = 'row-resize';
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', stopResize);
+        e.preventDefault();
+    });
+
+    function handleMouseMove(e) {
+        if (!isResizing) return;
+
+        const container = document.querySelector('.dynamic-container');
+        const containerHeight = container.offsetHeight;
+        const deltaY = e.clientY - startY;
+        const newEditorHeight = startHeight + deltaY;
+
+        // Calculate editor height as percentage of container
+        const editorHeightPercentage = (newEditorHeight / containerHeight) * 100;
+
+        // Don't allow editor to be smaller than 20% or larger than 80% of container
+        const minHeightPercentage = 20;
+        const maxHeightPercentage = 80;
+
+        if (editorHeightPercentage > minHeightPercentage && editorHeightPercentage < maxHeightPercentage) {
+            // Use percentage for responsive sizing
+            editorPanel.style.height = `${editorHeightPercentage}%`;
+
+            // Calculate output panel height as the remaining percentage
+            const outputHeightPercentage = 100 - editorHeightPercentage;
+            outputPanel.style.height = `${outputHeightPercentage}%`;
+        }
+    }
+
+    function stopResize() {
+        if (isResizing) {
+            isResizing = false;
+            document.documentElement.style.cursor = '';
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', stopResize);
+        }
+    }
+
+    // Prevent scrolling the page when mouse wheel is used over the text input
+    textInput.addEventListener('wheel', function(e) {
+        const contentHeight = this.scrollHeight;
+        const visibleHeight = this.clientHeight;
+        const scrollTop = this.scrollTop;
+
+        // Check if we're at the top or bottom boundary
+        const isAtTop = scrollTop === 0;
+        const isAtBottom = scrollTop + visibleHeight >= contentHeight - 1;
+
+        // If we're at a boundary and trying to scroll further in that direction,
+        // let the page scroll normally
+        if ((isAtTop && e.deltaY < 0) || (isAtBottom && e.deltaY > 0)) {
+            return;
+        }
+
+        // Otherwise, scroll the text input and prevent page scrolling
+        e.preventDefault();
+        this.scrollTop += e.deltaY;
+    }, { passive: false });
+
+    // Functions
+    // Analyze text to extract context summary when text is pasted
+    async function analyzeDocumentContext(text) {
+        if (!text || text.trim().length < 100 || state.isAnalyzing) {
+            return; // Skip short texts or if already analyzing
+        }
+
+        try {
+            // Set analyzing state flag
+            state.isAnalyzing = true;
+
+            // Only disable the button if there's no selection
+            if (!state.selectedText || state.selectedText.length === 0) {
+                generateButton.disabled = true;
+            }
+
+            // Call Claude API to get document context
+            const contextSummary = await analyzeTextWithClaude(text);
+
+            if (contextSummary) {
+                // Store in state for later use
+                state.documentContext = contextSummary;
+
+                // Show a subtle visual indicator that context is available
+                document.body.classList.add('has-document-context');
+
+                // Show a non-disruptive notification that analysis is complete
+                showNotification('Text analysis complete. Card quality will be improved.', 'success', 4000);
+            }
+
+            state.fromPaste = false;
+        } catch (error) {
+            console.error('Error analyzing document:', error);
+        } finally {
+            // Reset analyzing state
+            state.isAnalyzing = false;
+
+            // Re-enable button if there's a selection
+            const hasSelection = state.selectedText && state.selectedText.length > 0;
+            generateButton.disabled = !hasSelection;
+        }
+    }
+
+    // Function to clear all highlights - adapted for Quill
+    function clearAllHighlights() {
+        // Remove the selection class
+        textInput.classList.remove('has-selection');
+
+        // Clear any selection in Quill or fall back to window selection
+        if (state.editor && state.editor.setSelection) {
+            // Clear Quill selection
+            state.editor.setSelection(null);
+        } else {
+            // Fallback to window selection
+            window.getSelection().removeAllRanges();
+        }
+    }
+
+    async function generateCardsFromSelection() {
+        const selectedText = state.selectedText;
+
+        if (!selectedText) {
+            showNotification('Please select some text first.', 'error');
+            return;
+        }
+
+        try {
+            // Update UI to show processing state
+            generateButton.disabled = true;
+            generateButton.textContent = 'Generating...';
+
+            // Get cards from Claude API
+            const cards = await generateCardsWithClaude(
+                selectedText,
+                Object.keys(state.decks).join(', '),
+                state.documentContext
+            );
+
+            // Add generated cards to state
+            state.cards = [...state.cards, ...cards];
+
+            // Update UI
+            renderCards();
+            updateButtonStates();
+
+            showNotification(`${cards.length} cards created successfully`, 'success');
+        } catch (error) {
+            console.error('Error generating cards:', error);
+
+            // Provide a more specific message for timeout errors
+            if (error.message && error.message.includes('FUNCTION_INVOCATION_TIMEOUT')) {
+                showNotification('The request timed out. Please select a smaller portion of text and try again.', 'error');
+            } else if (error.message && error.message.includes('timed out')) {
+                showNotification('The request timed out. Please select a smaller portion of text and try again.', 'error');
+            } else {
+                showNotification('Error generating cards: ' + (error.message || 'Please try again.'), 'error');
+            }
+        } finally {
+            generateButton.disabled = false;
+            generateButton.textContent = 'Create Cards';
+        }
+    }
+
+    function renderCards() {
+        cardsContainer.innerHTML = '';
+
+        // Show or hide the cards section based on whether there are cards
+        if (state.cards.length > 0) {
+            // Show the output panel and splitter if they're hidden
+            if (outputPanel.style.display === 'none') {
+                // Show the splitter handle with animation
+                splitterHandle.style.display = 'flex';
+                splitterHandle.classList.add('animate-in');
+
+                // Show the output panel
+                outputPanel.style.display = 'flex';
+
+                // Set the editor panel to 50% height
+                editorPanel.style.height = '50%';
+            }
+
+            // Render each card
+            state.cards.forEach((card, index) => {
+                const cardElement = createCardElement(card, index);
+                cardsContainer.appendChild(cardElement);
+            });
+        } else {
+            // Hide the output panel and splitter if there are no cards
+            splitterHandle.style.display = 'none';
+            outputPanel.style.display = 'none';
+
+            // Reset the editor panel to full height
+            editorPanel.style.height = '100%';
+        }
+    }
+
+    // renderQuestions function removed
+
+    function createCardElement(card, index) {
+        const cardDiv = document.createElement('div');
+        cardDiv.className = 'card';
+
+        // Sanitize the card data to ensure it's rendered properly
+        const sanitizeHtml = (text) => {
+            // Create a temporary div
+            const tempDiv = document.createElement('div');
+            // Set the text content (this escapes HTML)
+            tempDiv.textContent = text;
+            // Return the sanitized HTML
+            return tempDiv.innerHTML;
+        };
+
+        // Ensure the content is properly formatted strings, not JSON objects
+        const front = typeof card.front === 'string' ? sanitizeHtml(card.front) : sanitizeHtml(JSON.stringify(card.front));
+        const back = typeof card.back === 'string' ? sanitizeHtml(card.back) : sanitizeHtml(JSON.stringify(card.back));
+        const deck = typeof card.deck === 'string' ? sanitizeHtml(card.deck) : sanitizeHtml(JSON.stringify(card.deck));
+
+        cardDiv.innerHTML = `
+            <div class="card-header">
+                <div class="card-header-left">
+                    <span class="card-deck" title="Click to change deck">${deck}</span>
+                </div>
+                <div class="card-header-right">
+                    <button class="delete-button" data-index="${index}" title="Delete Card">×</button>
+                </div>
+            </div>
+            <div class="card-content">
+                <div class="card-front">
+                    <div class="card-text" contenteditable="true">${front}</div>
+                </div>
+                <div class="card-back">
+                    <div class="card-text" contenteditable="true">${back}</div>
+                </div>
+            </div>
+        `;
+
+        // Add event listeners
+        const deleteButton = cardDiv.querySelector('.delete-button');
+        deleteButton.addEventListener('click', () => deleteCard(index));
+
+        const deckLabel = cardDiv.querySelector('.card-deck');
+        deckLabel.addEventListener('click', () => editCardDeck(index));
+
+        // Make card content editable
+        const frontText = cardDiv.querySelector('.card-front .card-text');
+        const backText = cardDiv.querySelector('.card-back .card-text');
+
+        frontText.addEventListener('blur', () => {
+            // Get text content instead of innerHTML to avoid HTML injection
+            state.cards[index].front = frontText.textContent;
+        });
+
+        backText.addEventListener('blur', () => {
+            // Get text content instead of innerHTML to avoid HTML injection
+            state.cards[index].back = backText.textContent;
+        });
+
+        return cardDiv;
+    }
+
+    // createQuestionElement function removed
+
+    function deleteCard(index) {
+        state.cards.splice(index, 1);
+        renderCards();
+        updateButtonStates();
+    }
+
+    // deleteQuestion function removed
+
+    function editCardDeck(index) {
+        const card = state.cards[index];
+        const deckNames = Object.keys(state.decks);
+
+        if (deckNames.length === 0) {
+            showNotification('No decks available. Please check Mochi connection.', 'error');
+            return;
+        }
+
+        // Create an improved modal dialog with a dropdown
+        const modalOverlay = document.createElement('div');
+        modalOverlay.className = 'modal-overlay';
+
+        const modalContent = document.createElement('div');
+        modalContent.className = 'modal-content';
+
+        const modalHeader = document.createElement('h3');
+        modalHeader.textContent = 'Select Deck';
+
+        const modalSubHeader = document.createElement('p');
+        modalSubHeader.className = 'modal-subheader';
+        modalSubHeader.textContent = 'Choose a deck for this card:';
+
+        // Create a styled select element
+        const selectContainer = document.createElement('div');
+        selectContainer.className = 'modal-select-container';
+
+        const deckSelect = document.createElement('select');
+        deckSelect.className = 'deck-select';
+
+        // Add a refresh button
+        const refreshButton = document.createElement('button');
+        refreshButton.className = 'modal-refresh-button';
+        refreshButton.title = 'Refresh deck list from Mochi';
+        refreshButton.innerHTML = '↻';
+        refreshButton.addEventListener('click', () => {
+            refreshButton.disabled = true;
+
+            fetchDecks().then(() => {
+                // Update the select options
+                deckSelect.innerHTML = '';
+                const updatedDeckNames = Object.keys(state.decks).sort((a, b) =>
+                    a.localeCompare(b, undefined, { sensitivity: 'base' })
+                );
+
+                updatedDeckNames.forEach(deckName => {
+                    const option = document.createElement('option');
+                    option.value = deckName;
+                    option.textContent = deckName;
+                    if (deckName === card.deck) {
+                        option.selected = true;
+                    }
+                    deckSelect.appendChild(option);
+                });
+
+                // Show confirmation
+                refreshButton.innerHTML = '✓';
+                setTimeout(() => {
+                    refreshButton.innerHTML = '↻';
+                    refreshButton.disabled = false;
+                }, 1500);
+
+                showNotification(`${updatedDeckNames.length} decks loaded`, 'success');
+            }).catch(error => {
+                console.error('Error refreshing decks:', error);
+                refreshButton.innerHTML = '✗';
+                setTimeout(() => {
+                    refreshButton.innerHTML = '↻';
+                    refreshButton.disabled = false;
+                }, 1500);
+
+                showNotification('Failed to refresh decks', 'error');
+            });
+        });
+
+        // Get deck names and sort them alphabetically
+        const sortedDeckNames = deckNames.sort((a, b) =>
+            a.localeCompare(b, undefined, { sensitivity: 'base' })
+        );
+
+        // Add options based on available decks
+        sortedDeckNames.forEach(deckName => {
+            const option = document.createElement('option');
+            option.value = deckName;
+            option.textContent = deckName;
+            if (deckName === card.deck) {
+                option.selected = true;
+            }
+            deckSelect.appendChild(option);
+        });
+
+        selectContainer.appendChild(deckSelect);
+        selectContainer.appendChild(refreshButton);
+
+        // Create button container
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'modal-buttons';
+
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        cancelButton.className = 'modal-cancel';
+        cancelButton.addEventListener('click', () => {
+            document.body.removeChild(modalOverlay);
+        });
+
+        const saveButton = document.createElement('button');
+        saveButton.textContent = 'Update Deck';
+        saveButton.className = 'modal-save';
+        saveButton.addEventListener('click', () => {
+            const oldDeck = card.deck;
+            card.deck = deckSelect.value;
+            renderCards();
+            document.body.removeChild(modalOverlay);
+
+            if (oldDeck !== card.deck) {
+                showNotification(`Card moved to "${card.deck}" deck`, 'success');
+            }
+        });
+
+        buttonContainer.appendChild(cancelButton);
+        buttonContainer.appendChild(saveButton);
+
+        // Assemble the modal
+        modalContent.appendChild(modalHeader);
+        modalContent.appendChild(modalSubHeader);
+        modalContent.appendChild(selectContainer);
+        modalContent.appendChild(buttonContainer);
+
+        modalOverlay.appendChild(modalContent);
+        document.body.appendChild(modalOverlay);
+    }
+
+    function updateButtonStates() {
+        // Update card-related buttons based on whether cards exist
+        const hasCards = state.cards.length > 0;
+        exportButton.disabled = !hasCards;
+        clearCardsButton.disabled = !hasCards;
+
+        // Update create cards button based on text selection
+        const hasSelection = state.selectedText && state.selectedText.length > 0;
+        generateButton.disabled = !hasSelection;
+    }
+
+    function clearAllCards() {
+        // Simply clear all cards without confirmation
+        state.cards = [];
+        renderCards(); // This will hide the output panel and restore full height to editor
+        updateButtonStates();
+        showNotification('All cards cleared', 'info');
+    }
+
+    // clearAllQuestions function removed
+
+
+    async function exportToMochi() {
+        try {
+            // Check if we have any cards to export
+            if (state.cards.length === 0) {
+                showNotification('No cards to export', 'info');
+                return;
+            }
+
+            // Get the stored API keys
+            const { mochiApiKey } = getStoredApiKeys();
+
+            // If no Mochi API key, export as markdown instead
+            if (!mochiApiKey) {
+                exportAsMarkdown();
+                return;
+            }
+
+            // If we have a Mochi API key, prepare the cards for Mochi
+            const mochiData = formatCardsForMochi();
+            const cards = JSON.parse(mochiData).cards;
+
+            // Show loading indicator
+            exportButton.disabled = true;
+            exportButton.textContent = 'Uploading...';
+
+            // Use the server endpoint to handle Mochi uploads, passing the user's API key
+            const response = await fetch('/api/upload-to-mochi', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    cards,
+                    userMochiKey: mochiApiKey // Pass the user's Mochi API key to the server
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to upload to Mochi');
+            }
+
+            const result = await response.json();
+
+            // Success notification
+            showNotification(`${result.totalSuccess} of ${result.totalCards} cards uploaded to Mochi successfully!`, 'success');
+
+        } catch (error) {
+            console.error('Error uploading to Mochi API:', error);
+            showNotification('Error uploading to Mochi. Exporting as markdown instead.', 'error');
+
+            // Fall back to markdown export
+            exportAsMarkdown();
+        } finally {
+            // Reset button state
+            exportButton.disabled = false;
+
+            // Update button text based on whether we have a Mochi API key
+            const { mochiApiKey } = getStoredApiKeys();
+            exportButton.textContent = mochiApiKey ? 'Export to Mochi' : 'Export as Markdown';
+        }
+    }
+
+    function exportAsMarkdown() {
+        if (state.cards.length === 0) {
+            showNotification('No cards to export', 'info');
+            return;
+        }
+
+        // Format cards as markdown
+        let markdown = `# Flashcards - ${new Date().toLocaleDateString()}\n\n`;
+
+        // Group cards by deck
+        const deckGroups = {};
+
+        state.cards.forEach(card => {
+            const deckName = card.deck || 'General';
+            if (!deckGroups[deckName]) {
+                deckGroups[deckName] = [];
+            }
+            deckGroups[deckName].push(card);
+        });
+
+        // Add each deck's cards to the markdown
+        for (const [deckName, cards] of Object.entries(deckGroups)) {
+            markdown += `## ${deckName}\n\n`;
+
+            cards.forEach((card, index) => {
+                markdown += `### Card ${index + 1}\n\n`;
+                markdown += `**Question:** ${card.front}\n\n`;
+                markdown += `---\n\n`;
+                markdown += `**Answer:** ${card.back}\n\n`;
+            });
+        }
+
+        try {
+            // Download the markdown file
+            const blob = new Blob([markdown], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `flashcards-${new Date().toISOString().slice(0, 10)}.md`;
+            a.style.display = 'none'; // Hide the element
+            document.body.appendChild(a);
+            a.click();
+
+            // Cleanup
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+
+            showNotification(`${state.cards.length} cards exported as markdown`, 'success');
+        } catch (error) {
+            console.error('Error exporting markdown:', error);
+
+            // Alternative method for environments where the download might be blocked
+            const textarea = document.createElement('textarea');
+            textarea.value = markdown;
+            document.body.appendChild(textarea);
+            textarea.select();
+
+            try {
+                document.execCommand('copy');
+                showNotification('Export copied to clipboard instead (download failed)', 'warning');
+            } catch (clipboardError) {
+                console.error('Clipboard copy failed:', clipboardError);
+                showNotification('Export failed. Check console for markdown content', 'error');
+                console.log('MARKDOWN CONTENT:');
+                console.log(markdown);
+            }
+
+            document.body.removeChild(textarea);
+        }
+    }
+
+    // exportQuestions function removed
+
+    function formatCardsForMochi() {
+        // Group cards by deck
+        const deckMap = {};
+
+        state.cards.forEach(card => {
+            const deckName = card.deck;
+            const deckId = state.decks[deckName];
+
+            if (!deckId) {
+                console.warn(`No deck ID found for deck: ${deckName}`);
+                return; // Skip this card
+            }
+
+            if (!deckMap[deckId]) {
+                deckMap[deckId] = [];
+            }
+
+            // Use the exact Mochi format: front \n---\n back (single newlines)
+            deckMap[deckId].push({
+                content: `${card.front}\n---\n${card.back}`
+            });
+        });
+
+        // Format according to Mochi's JSON format
+        const data = {
+            version: 2,
+            cards: []
+        };
+
+        // Add cards with their deck IDs
+        for (const [deckId, cards] of Object.entries(deckMap)) {
+            cards.forEach(card => {
+                data.cards.push({
+                    ...card,
+                    'deck-id': deckId
+                });
+            });
+        }
+
+        console.log('Formatted cards for Mochi:', data);
+        return JSON.stringify(data, null, 2);
+    }
+
+    function downloadExport(data, filename) {
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 0);
+    }
+});
+
+>>>> src/styles.css
+/* Global Styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+:root {
+    /* Color Palette - Revised for better contrast and harmony */
+    --primary-color: #2563eb; /* Deeper blue for better contrast */
+    --primary-light: #eef2ff; /* Subtle blue for backgrounds */
+    --primary-dark: #1d4ed8; /* For hover states */
+    --secondary-color: #475569; /* More neutral secondary */
+    --text-color: #0f172a; /* Nearly black but softer */
+    --accent-color: #f59e0b; /* Warmer accent */
+
+    /* Grayscale - Simplified for consistency */
+    --white: #ffffff;
+    --gray-50: #f8fafc;
+    --gray-100: #f1f5f9;
+    --gray-200: #e2e8f0;
+    --gray-300: #cbd5e1;
+    --gray-400: #94a3b8;
+    --gray-500: #64748b;
+    --gray-600: #475569;
+    --gray-700: #334155;
+    --gray-800: #1e293b;
+    --gray-900: #0f172a;
+
+    /* UI Elements */
+    --highlight-color: #fef3c7; /* Softer highlight */
+    --card-shadow: rgba(0, 0, 0, 0.05) 0px 1px 3px, rgba(0, 0, 0, 0.05) 0px 1px 2px;
+    --card-shadow-hover: rgba(0, 0, 0, 0.1) 0px 4px 6px, rgba(0, 0, 0, 0.05) 0px 2px 4px;
+    --header-shadow: rgba(0, 0, 0, 0.08) 0px 1px 3px;
+    --transition: all 0.2s ease-in-out;
+    --border-radius: 8px;
+    --content-max-width: 1400px;
+
+    /* Typography - Improved legibility */
+    --font-main: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+
+    /* Layout */
+    --header-height: 64px; /* Slightly taller header */
+    --editor-default-height: 65%;
+
+    /* Breakpoints for responsive design */
+    --mobile-breakpoint: 640px;
+    --tablet-breakpoint: 768px;
+}
+
+body {
+    font-family: var(--font-main);
+    line-height: 1.6;
+    color: var(--text-color);
+    background-color: var(--gray-100);
+    font-size: 16px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.app-container {
+    max-width: var(--content-max-width);
+    width: 100%;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* Header Section */
+header {
+    background-color: var(--primary-color);
+    background-image: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+    color: white;
+    box-shadow: var(--header-shadow);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    height: var(--header-height);
+}
+
+.header-content {
+    height: 100%;
+    padding: 0 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: var(--content-max-width);
+    margin: 0 auto;
+}
+
+.header-controls {
+    display: flex;
+    align-items: center;
+}
+
+.unified-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.header-title {
+    display: flex;
+    flex-direction: column;
+}
+
+h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.25px;
+}
+
+/* Responsive header on small screens */
+@media (max-width: 640px) {
+    .header-content {
+        padding: 0 12px;
+    }
+
+    h1 {
+        font-size: 16px;
+    }
+
+    .header-attribution {
+        font-size: 10px;
+    }
+
+    button.primary-action {
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+}
+
+.header-attribution {
+    font-size: 12px;
+    opacity: 0.85;
+    margin-top: 4px;
+    letter-spacing: 0.2px;
+}
+
+.header-attribution a {
+    color: white;
+    text-decoration: none;
+    border-bottom: 1px dotted rgba(255, 255, 255, 0.5);
+    transition: all 0.15s ease;
+    padding-bottom: 1px;
+}
+
+.header-attribution a:hover {
+    color: white;
+    border-bottom: 1px solid white;
+    opacity: 1;
+}
+
+/* Dropdown Menu */
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+/* Menu styles already consolidated with header buttons */
+
+.menu-icon {
+    width: 18px;
+    height: 18px;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>');
+    background-repeat: no-repeat;
+    background-position: center;
+    opacity: 0.9;
+}
+
+.dropdown-menu {
+    position: absolute;
+    right: 0;
+    top: 44px;
+    background-color: white;
+    min-width: 180px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    padding: 8px 0;
+    z-index: 110;
+    transform: translateY(-10px);
+    opacity: 0;
+    visibility: hidden;
+    transition: transform 0.2s ease, opacity 0.2s ease, visibility 0.2s ease;
+    border: 1px solid var(--gray-200);
+}
+
+.dropdown-menu.show {
+    transform: translateY(0);
+    opacity: 1;
+    visibility: visible;
+}
+
+.dropdown-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px 16px;
+    color: var(--gray-700);
+    background-color: transparent;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.dropdown-item:hover:not(:disabled) {
+    background-color: var(--gray-100);
+    color: var(--gray-900);
+    transform: none;
+    box-shadow: none;
+}
+
+.dropdown-item:disabled {
+    color: var(--gray-400);
+    background-color: transparent;
+    cursor: not-allowed;
+}
+
+/* Button Styles */
+button {
+    background-color: var(--white);
+    color: var(--gray-700);
+    border: 1px solid var(--gray-300);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.25;
+}
+
+@media (max-width: 640px) {
+    button {
+        padding: 6px 12px;
+        font-size: 13px;
+    }
+}
+
+button:hover {
+    background-color: var(--gray-50);
+    border-color: var(--gray-400);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+}
+
+button:active {
+    transform: translateY(0);
+    background-color: var(--gray-100);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+button:disabled {
+    background-color: var(--gray-100);
+    color: var(--gray-400);
+    border-color: var(--gray-200);
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
+button.primary-action {
+    background-color: rgba(255, 255, 255, 0.18);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    font-weight: 600;
+    letter-spacing: 0.25px;
+    padding: 8px 18px;
+}
+
+button.primary-action:hover {
+    background-color: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+button.primary-action:active {
+    background-color: rgba(255, 255, 255, 0.22);
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+button.primary-action:disabled {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: none;
+}
+
+/* Main Content Section with Dynamic Layout */
+.main-content {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    height: calc(100vh - var(--header-height));
+    overflow: hidden;
+}
+
+/* Tooltip styles for the disabled Create Cards button */
+button[disabled][title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    z-index: 100;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 6px;
+    padding: 6px 10px;
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+/* Position relative for the tooltip container */
+button.primary-action {
+    position: relative;
+}
+
+.dynamic-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+}
+
+/* Editor Panel */
+.editor-panel {
+    flex-grow: 1;
+    background-color: var(--white);
+    overflow: hidden;
+    position: relative;
+    transition: height 0.3s ease;
+    height: 100%;
+}
+
+.text-input {
+    width: 100%;
+    height: 100%;
+    padding: 0px;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--text-color);
+    background-color: var(--white);
+    border: none;
+    outline: none;
+    resize: none;
+    overflow-y: auto;
+    position: relative;
+    white-space: pre-wrap;
+    word-break: break-word;
+    tab-size: 4;
+}
+
+.text-input:focus {
+    outline: none;
+}
+
+.text-input::placeholder {
+    color: var(--gray-500);
+    font-style: italic;
+}
+
+.text-input[contenteditable]:empty::before {
+    content: attr(placeholder);
+    color: var(--gray-500);
+    font-style: italic;
+    pointer-events: none;
+}
+
+/* Splitter Handle */
+.splitter-handle {
+    height: 14px;
+    background-color: var(--gray-100);
+    cursor: row-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    position: relative;
+    z-index: 10;
+    border-top: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--gray-200);
+    transition: all 0.3s ease;
+    opacity: 1;
+}
+
+.splitter-handle:hover {
+    background-color: var(--gray-200);
+}
+
+.splitter-handle.animate-in {
+    animation: fadeIn 0.3s ease forwards;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.handle-line {
+    width: 50px;
+    height: 4px;
+    background-color: var(--gray-400);
+    border-radius: 2px;
+}
+
+/* Output Panel */
+.output-panel {
+    flex-grow: 1;
+    background-color: var(--white);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    height: 50%;
+}
+
+/* Spinner animation for loading states */
+@keyframes spinner {
+    0% { transform: rotate(0deg); }
+    50% { transform: rotate(180deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Document context indicator - subtle styling when Claude understands the text */
+body.has-document-context .text-input {
+    background-color: rgba(237, 242, 255, 0.2);
+    transition: all 0.5s ease;
+}
+
+/* Content Container */
+.content-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    background-color: var(--gray-100);
+    height: 100%;
+}
+
+/* Highlight styles */
+/* Simple selection styles */
+::selection {
+    background-color: var(--highlight-color);
+}
+
+/* Class for indicating text is selected */
+.text-input.has-selection ::selection {
+    background-color: var(--highlight-color);
+}
+
+/* Add a subtle border to show selection status */
+.text-input.has-selection {
+    outline: 2px solid var(--primary-light);
+    /* Removed yellow background color */
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--gray-100);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-400);
+}
+
+/* Cards Container */
+.cards-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 20px;
+    padding: 20px;
+}
+
+/* Responsive cards on small screens */
+@media (max-width: 640px) {
+    .cards-container {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        padding: 12px;
+    }
+}
+
+.card {
+    background-color: var(--white);
+    border-radius: 8px;
+    border: 1px solid var(--gray-200);
+    overflow: hidden;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    position: relative;
+}
+
+.card:hover {
+    border-color: var(--primary-light);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: linear-gradient(to right, var(--primary-light), rgba(237, 242, 255, 0.5));
+    border-bottom: 1px solid rgba(37, 99, 235, 0.1);
+    font-size: 12px;
+    height: 42px;
+    min-height: 42px;
+}
+
+.card-header-left, .card-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-header button {
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: 4px;
+    height: 22px;
+    background-color: transparent;
+    box-shadow: none;
+    font-weight: 500;
+    color: var(--gray-700);
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.card-header button:hover {
+    background-color: rgba(255, 255, 255, 0.8);
+    border-color: var(--gray-300);
+    color: var(--gray-800);
+}
+
+.card-header button:active {
+    transform: translateY(1px);
+}
+
+.card-deck {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--white);
+    background-color: var(--primary-color);
+    padding: 3px 10px;
+    border-radius: 4px;
+    line-height: 1.4;
+    height: 24px;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.card-deck:hover {
+    background-color: var(--primary-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Deck selector styles */
+.deck-selector-label {
+    font-size: 11px;
+    color: var(--gray-600);
+    margin-right: 8px;
+}
+
+.deck-count {
+    font-size: 10px;
+    color: var(--gray-500);
+    margin-left: 4px;
+    font-weight: normal;
+}
+
+.deck-selector-container {
+    display: flex;
+    align-items: center;
+    margin-right: 12px;
+}
+
+.deck-selector {
+    min-width: 180px;
+    height: 30px;
+    padding: 2px 8px;
+    font-size: 13px;
+    border: 1px solid var(--gray-300);
+    border-radius: 4px 0 0 4px;
+    background-color: var(--white);
+    color: var(--gray-800);
+    cursor: pointer;
+    outline: none;
+}
+
+.deck-selector:hover {
+    border-color: var(--primary-color);
+}
+
+.deck-selector:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.refresh-decks-button {
+    height: 30px;
+    width: 30px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0 4px 4px 0;
+    margin-left: -1px;
+    font-size: 14px;
+    background-color: var(--gray-100);
+    border: 1px solid var(--gray-300);
+    cursor: pointer;
+}
+
+.refresh-decks-button:hover {
+    background-color: var(--primary-light);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.refresh-decks-button:active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+/* Status notification */
+.status-notification {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 14px 20px;
+    background-color: var(--white);
+    color: var(--gray-800);
+    border-radius: 10px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    font-size: 14px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transform: translateY(30px) scale(0.95);
+    opacity: 0;
+    pointer-events: none;
+    border: 1px solid var(--gray-200);
+    font-weight: 500;
+    min-width: 260px;
+    max-width: 90%;
+}
+
+.status-notification.show {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+}
+
+.status-notification.success {
+    border-left: 4px solid #10b981;
+    background-color: #f0fdf4;
+    color: #065f46;
+}
+
+.status-notification.error {
+    border-left: 4px solid #ef4444;
+    background-color: #fef2f2;
+    color: #b91c1c;
+}
+
+.status-notification.info {
+    border-left: 4px solid var(--primary-color);
+    background-color: var(--primary-light);
+    color: var(--primary-dark);
+}
+
+.status-notification .icon {
+    font-size: 20px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+}
+
+.status-notification.success .icon::before {
+    content: '✓';
+    color: #10b981;
+}
+
+.status-notification.error .icon::before {
+    content: '✗';
+    color: #ef4444;
+}
+
+.status-notification.info .icon::before {
+    content: 'ℹ';
+    color: var(--primary-color);
+}
+
+/* Animation for the notification */
+@keyframes notificationPop {
+    0% { transform: translateY(30px) scale(0.95); opacity: 0; }
+    100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* Modal styles for deck selection */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: var(--white);
+    border-radius: 8px;
+    box-shadow: var(--card-shadow-hover);
+    padding: 20px;
+    width: 95%;
+    max-width: 400px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.modal-content h3 {
+    font-size: 18px;
+    color: var(--gray-800);
+    margin: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.modal-subheader {
+    margin: 0 0 15px 0;
+    color: var(--gray-700);
+    font-size: 14px;
+}
+
+.modal-select-container {
+    display: flex;
+    margin-bottom: 20px;
+    width: 100%;
+}
+
+.deck-select {
+    flex-grow: 1;
+    padding: 10px;
+    border: 1px solid var(--gray-300);
+    border-radius: 4px 0 0 4px;
+    font-size: 14px;
+    color: var(--gray-800);
+    background-color: var(--white);
+    outline: none;
+}
+
+.deck-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 1px var(--primary-light);
+}
+
+.modal-refresh-button {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0 4px 4px 0;
+    margin-left: -1px;
+    font-size: 16px;
+    background-color: var(--gray-100);
+    border: 1px solid var(--gray-300);
+    cursor: pointer;
+}
+
+.modal-refresh-button:hover {
+    background-color: var(--primary-light);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.modal-refresh-button:active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.modal-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.modal-cancel {
+    background-color: var(--gray-100);
+    color: var(--gray-700);
+}
+
+.modal-save {
+    background-color: var(--primary-color);
+    color: var(--white);
+    border-color: var(--primary-dark);
+}
+
+.modal-save:hover {
+    background-color: var(--primary-dark);
+}
+
+.card-content {
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    flex-grow: 1;
+    padding: 14px;
+}
+
+.card-front, .card-back {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+}
+
+.card-back {
+    border-top: 1px solid rgba(203, 213, 225, 0.2);
+    margin-top: 8px;
+    padding-top: 8px;
+}
+
+.card-text {
+    width: 100%;
+    background-color: transparent;
+    border: 1px solid var(--gray-200);
+    border-radius: 5px;
+    padding: 10px 12px;
+    line-height: 1.5;
+    outline: none;
+    font-size: 14px;
+    min-height: 28px;
+    height: auto;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    transition: all 0.15s ease;
+}
+
+.card-front .card-text {
+    font-weight: 500;
+}
+
+.card-back .card-text {
+    font-weight: 400;
+    background-color: rgba(248, 250, 252, 0.5);
+}
+
+.card-text:hover {
+    border-color: var(--gray-300);
+}
+
+.card-text:focus {
+    border-color: var(--primary-color);
+    background-color: white;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+/* Removed card-actions styles as we're moving buttons to header */
+
+.delete-button {
+    color: white;
+    background-color: #ef4444;
+    border: 1px solid #dc2626;
+    min-width: auto;
+    font-size: 16px;
+    font-weight: bold;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);
+    transition: all 0.2s ease;
+}
+
+.delete-button:hover {
+    background-color: #dc2626;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3);
+    border-color: #b91c1c;
+}
+
+/* Edit deck button removed - now using clickable deck label */
+
+/* Questions Container */
+.questions-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 20px;
+    padding: 20px;
+}
+
+.question-item {
+    background-color: var(--white);
+    border-radius: 10px;
+    border: 1px solid var(--gray-200);
+    overflow: hidden;
+    transition: all 0.2s ease;
+    box-shadow: var(--card-shadow);
+    display: flex;
+    flex-direction: column;
+    min-height: 85px;
+    height: auto;
+    position: relative;
+}
+
+.question-item::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: 10px;
+    box-shadow: 0 0 0 2px transparent;
+    transition: all 0.2s ease;
+}
+
+.question-item:hover {
+    border-color: var(--gray-300);
+    box-shadow: var(--card-shadow-hover);
+    transform: translateY(-2px);
+}
+
+.question-item:hover::after {
+    box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.question-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background-color: var(--primary-light);
+    border-bottom: 1px solid var(--gray-200);
+    font-size: 12px;
+    height: 46px;
+    min-height: 46px;
+}
+
+.question-header-left, .question-header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.question-header button {
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: 4px;
+    height: 28px;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+.question-header button:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.question-topic {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--white);
+    background-color: var(--accent-color);
+    padding: 3px 10px;
+    border-radius: 16px;
+    line-height: 1.3;
+    height: 22px;
+    letter-spacing: 0.2px;
+}
+
+.question-body {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    overflow: visible;
+    background: linear-gradient(to bottom, var(--white), var(--gray-50));
+    flex-grow: 1;
+}
+
+.question-text {
+    font-weight: 500;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-color);
+    overflow: visible;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    padding: 5px 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.question-text:hover {
+    background-color: rgba(0, 0, 0, 0.01);
+}
+
+.question-text:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    background-color: var(--white);
+    box-shadow: 0 0 0 3px var(--primary-light);
+    padding: 5px 10px;
+}
+
+/* Removed question-actions styles as we moved buttons to the header */
+
+.delete-question-button {
+    color: #d93025;
+    background-color: transparent;
+    border-color: #d93025;
+    min-width: auto;
+}
+
+.delete-question-button:hover {
+    background-color: #fce8e6;
+}
+
+/* Text formatting within the input */
+.text-input h1, .text-input h2, .text-input h3, .text-input h4, .text-input h5, .text-input h6 {
+    font-family: inherit;
+    color: var(--text-color);
+    margin-top: 1.2em;
+    margin-bottom: 0.6em;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.text-input h1 { font-size: 1.5em; }
+.text-input h2 { font-size: 1.3em; }
+.text-input h3 { font-size: 1.2em; }
+.text-input h4, .text-input h5, .text-input h6 { font-size: 1.1em; }
+
+/* Support for lists */
+.text-input ul, .text-input ol {
+    padding-left: 2em;
+    margin: 0.7em 0;
+}
+
+.text-input li {
+    margin-bottom: 0.4em;
+}
+
+/* Support for basic elements */
+.text-input p {
+    margin-bottom: 0.9em;
+}
+
+.text-input blockquote {
+    border-left: 3px solid var(--primary-light);
+    margin-left: 0;
+    padding: 0.5em 0 0.5em 1em;
+    color: var(--gray-700);
+    background-color: var(--gray-50);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Remove potentially problematic elements */
+.text-input img, .text-input video, .text-input iframe, .text-input embed, .text-input object {
+    display: none;
+}
+
+/* Quill Editor Styles */
+/* Ensure Quill has proper height */
+.text-input {
+    height: 100%;
+}
+
+/* Style the Quill container to take up full height */
+.ql-container.ql-snow {
+    height: calc(100% - 42px); /* Account for toolbar height */
+    overflow: auto;
+    border: none;
+    font-family: var(--font-main);
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+/* Style the toolbar */
+.ql-toolbar.ql-snow {
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    border-bottom: 1px solid var(--gray-300);
+    background-color: var(--gray-50);
+    padding: 8px 20px;
+}
+
+/* Style the editor content area */
+.ql-editor {
+    min-height: 100%;
+    padding: 20px;
+    font-family: var(--font-main);
+    color: var(--text-color);
+}
+
+/* Customizing selection */
+.ql-editor ::selection {
+    background-color: var(--highlight-color);
+}
+
+/* Style headings */
+.ql-editor h1 {
+    font-size: 1.5em;
+    margin-top: 1.2em;
+    margin-bottom: 0.6em;
+    font-weight: 600;
+}
+
+.ql-editor h2 {
+    font-size: 1.3em;
+    margin-top: 1.2em;
+    margin-bottom: 0.6em;
+    font-weight: 600;
+}
+
+.ql-editor h3 {
+    font-size: 1.2em;
+    margin-top: 1.2em;
+    margin-bottom: 0.6em;
+    font-weight: 600;
+}
+
+/* Style lists */
+.ql-editor ul,
+.ql-editor ol {
+    padding-left: 1.5em;
+    margin: 0.7em 0;
+}
+
+.ql-editor ul > li {
+    list-style-type: disc;
+    margin-bottom: 0.4em;
+}
+
+.ql-editor ol > li {
+    list-style-type: decimal;
+    margin-bottom: 0.4em;
+}
+
+/* Style blockquotes */
+.ql-editor blockquote {
+    border-left: 3px solid var(--primary-light);
+    margin-left: 0;
+    padding: 0.5em 0 0.5em 1em;
+    color: var(--gray-700);
+    background-color: var(--gray-50);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Visual indication of selection */
+.text-input.has-selection .ql-editor {
+    /* Removed yellow background color */
+    outline: 2px solid var(--primary-light);
+}
+
+/* Make placeholder text more visible */
+.ql-editor.ql-blank::before {
+    color: var(--gray-500);
+    font-style: italic;
+}
+
+/* API Key Management */
+.api-key-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    animation: fadeIn 0.2s ease forwards;
+}
+
+@keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+}
+
+.api-key-container {
+    width: 520px;
+    max-width: 90%;
+    background-color: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    padding: 32px;
+    transform: translateY(20px);
+    animation: slideUp 0.3s ease forwards;
+    border: 1px solid var(--gray-200);
+}
+
+@media (max-width: 640px) {
+    .api-key-container {
+        padding: 20px 16px;
+        max-width: 95%;
+    }
+}
+
+@keyframes slideUp {
+    0% { transform: translateY(20px); }
+    100% { transform: translateY(0); }
+}
+
+.api-key-header {
+    text-align: center;
+    margin-bottom: 28px;
+}
+
+.api-key-header h2 {
+    margin-bottom: 12px;
+    color: var(--gray-900);
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.api-key-header p {
+    color: var(--gray-800);
+    font-size: 15px;
+    line-height: 1.6;
+    max-width: 90%;
+    margin: 0 auto 12px;
+    font-weight: 500;
+    background-color: var(--primary-light);
+    padding: 10px 14px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.security-disclaimer {
+    background-color: #fffbeb;
+    border: 1px solid #fbbf24;
+    color: #92400e;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin: 12px auto 4px;
+    max-width: 95%;
+    text-align: center;
+    font-weight: 500;
+    line-height: 1.5;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(251, 191, 36, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+}
+
+.api-key-form {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.api-key-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.api-key-input-group label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-800);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.api-key-input-group label span.required {
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+    background-color: var(--primary-color);
+    padding: 3px 8px;
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.api-key-input-group label span.optional {
+    color: var(--gray-600);
+    font-weight: normal;
+    font-size: 13px;
+    background-color: var(--gray-200);
+    padding: 3px 8px;
+    border-radius: 10px;
+}
+
+.api-key-input-group input {
+    padding: 14px;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: var(--font-mono);
+    width: 100%;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+    background-color: var(--gray-50);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+/* Special styling for the anthropic API key input */
+#anthropicApiKey {
+    border-left-width: 4px;
+}
+
+.api-key-input-group input:hover {
+    border-color: var(--gray-300);
+}
+
+.api-key-input-group input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    background-color: var(--white);
+    box-shadow: 0 0 0 4px var(--primary-light), inset 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.api-key-help {
+    font-size: 13px;
+    color: var(--gray-600);
+    margin-top: 6px;
+    line-height: 1.5;
+}
+
+.api-key-help a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+    border-bottom: 1px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.api-key-help a:hover {
+    border-bottom-color: var(--primary-color);
+}
+
+.api-key-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 28px;
+}
+
+.api-key-button {
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: none;
+    line-height: 1.2;
+}
+
+.api-key-button.secondary {
+    background-color: var(--gray-100);
+    color: var(--gray-700);
+    border: 1px solid var(--gray-200);
+}
+
+.api-key-button.secondary:hover {
+    background-color: var(--gray-200);
+    transform: translateY(-1px);
+}
+
+.api-key-button.primary {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.api-key-button.primary:hover {
+    background-color: var(--primary-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.api-key-button:active {
+    transform: translateY(0);
+}
+
+.api-key-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.api-key-toggle {
+    display: flex;
+    align-items: center;
+    margin-top: 6px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 14px;
+    color: var(--gray-700);
+}
+
+.api-key-toggle input {
+    margin-right: 8px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.api-key-error {
+    color: #e11d48;
+    font-size: 13px;
+    margin-top: 6px;
+    background-color: #fff1f2;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border-left: 3px solid #e11d48;
+    line-height: 1.4;
+}
+
+/* Header buttons like settings, menu, etc */
+.header-settings-button, .menu-button {
+    margin-left: 12px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.header-settings-button:hover, .menu-button:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+.header-settings-button:active, .menu-button:active {
+    transform: translateY(1px);
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.settings-icon {
+    width: 18px;
+    height: 18px;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>');
+    background-repeat: no-repeat;
+    background-position: center;
+    transition: all 0.2s ease;
+    opacity: 0.8;
+}
+>>>> src/index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flash Card Generator</title>
+    <link rel="stylesheet" href="styles.css">
+
+    <!-- Include Quill.js stylesheet and library -->
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>Flash Card Generator</h1>
+                    <div class="header-attribution">
+                        by <a href="https://dwarkeshpatel.com" target="_blank">Dwarkesh</a> •
+                        <a href="https://github.com/dwarkeshsp/spaced-rep" target="_blank">GitHub</a>
+                    </div>
+                </div>
+                <div class="header-controls">
+                    <div class="unified-controls">
+                        <button id="generateButton" class="primary-action" disabled title="Select text first">Create Cards</button>
+                        <div class="dropdown">
+                            <button id="menuButton" class="menu-button" aria-expanded="false" aria-haspopup="true">
+                                <span class="menu-icon"></span>
+                            </button>
+                            <div class="dropdown-menu" id="dropdown-menu">
+                                <button id="exportButton" disabled class="dropdown-item">Export to Mochi</button>
+                                <button id="clearCardsButton" disabled class="dropdown-item">Clear Cards</button>
+                                <button id="settingsButton" class="dropdown-item">API Keys</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="dynamic-container">
+                <!-- Text Input Panel -->
+                <section class="editor-panel" id="editorPanel">
+                    <div id="textInput" class="text-input"></div>
+                </section>
+
+                <!-- Handle for resizing (initially hidden) -->
+                <div class="splitter-handle" id="splitterHandle" style="display: none;">
+                    <div class="handle-line"></div>
+                </div>
+
+                <!-- Output Section (initially hidden) -->
+                <section class="output-panel" id="outputPanel" style="display: none;">
+                    <!-- Cards Content -->
+                    <div class="content-container">
+                        <div id="cardsContainer" class="cards-container"></div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Settings button moved to header -->
+
+    <!-- API Key Management Modal -->
+    <div id="apiKeyModal" class="api-key-overlay" style="display: none;">
+        <div class="api-key-container">
+            <div class="api-key-header">
+                <h2>API Key Setup</h2>
+                <div class="security-disclaimer">
+                    ⚠️ I vibe coded this whole thing. I know nothing about security. Please don't use API keys with large balances or auto-refills.
+                </div>
+            </div>
+            <div class="api-key-form">
+                <div class="api-key-input-group">
+                    <label for="anthropicApiKey">
+                        Claude API Key
+                        <span class="required">Required</span>
+                    </label>
+                    <input type="text" id="anthropicApiKey" placeholder="sk-ant-api03-..." autocomplete="off" style="border-left: 4px solid var(--primary-color);">
+                    <div class="api-key-help">
+                        Required to generate cards. Get your API key from <a href="https://console.anthropic.com/keys" target="_blank">console.anthropic.com/keys</a>
+                    </div>
+                    <div id="anthropicApiKeyError" class="api-key-error"></div>
+                </div>
+
+                <div class="api-key-input-group">
+                    <label for="mochiApiKey">
+                        Mochi API Key
+                        <span class="optional">Optional</span>
+                    </label>
+                    <input type="text" id="mochiApiKey" placeholder="Your Mochi API key (optional)" autocomplete="off">
+                    <div class="api-key-help">
+                        Optional - lets you export directly to Mochi. Without this, cards can still be exported as markdown.
+                    </div>
+                </div>
+
+                <div class="api-key-toggle">
+                    <input type="checkbox" id="storeLocallyCheckbox" checked>
+                    <label for="storeLocallyCheckbox">Remember API keys on this device</label>
+                </div>
+
+                <div class="api-key-actions">
+                    <button id="apiKeyCancel" class="api-key-button secondary">Cancel</button>
+                    <button id="apiKeySave" class="api-key-button primary">Save API Keys</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="scripts.js"></script>
+</body>
+</html>
+>>>> CLAUDE.md
+# Flash card Generator - Project Documentation
+
+## Project Overview
+
+Flash card Generator is a streamlined web application for creating high-quality spaced repetition flashcards from text content. The application allows users to paste text, highlight sections of interest, and use Claude 3.7 to generate effective flashcards that can be exported directly to Mochi or as markdown files.
+
+### Core Purpose
+
+The goal is to simplify the creation of effective spaced repetition cards that follow best practices established by researchers like Michael Nielsen and Andy Matuschak. The application focuses on generating cards that build conceptual understanding rather than rote memorization.
+
+## Technical Architecture
+
+### Frontend
+- Pure HTML/CSS/JavaScript implementation
+- Text input area with highlighting capabilities
+- Card preview with inline editing
+- Mobile-responsive design with modern UI
+- Direct Mochi integration for seamless workflow
+
+### Backend
+- Node.js Express server
+- Claude 3.7 API integration
+- Mochi API integration for deck management and direct upload
+- Environment variable-based API key management
+
+## Key Functionality
+
+1. **Text Input & Selection**:
+   - Users paste text and highlight sections they want to convert to flashcards
+   - Text is properly sanitized and displayed with preserved formatting
+   - Resizable interface with split-panel design
+
+2. **Card Generation**:
+   - Highlighted text is sent to Claude 3.7 via the server
+   - Claude generates 1-5 cards based on content complexity
+   - Cards follow best practices for spaced repetition learning
+   - Appropriate deck categorization based on Mochi decks
+
+3. **Mochi Integration**:
+   - Dynamic fetching of deck list from user's Mochi account
+   - Direct upload to Mochi without file handling
+   - Proper filtering for active decks (excludes trashed/archived)
+   - Fallback to file export if API integration is unavailable
+
+4. **User Experience**:
+   - Modern notification system instead of alerts
+   - Confirmation modals for destructive actions
+   - Compact card design for easier review
+   - Inline editing of all generated content
+
+## Implementation Details
+
+### API Communication
+
+- Claude API for intelligent content generation
+- Mochi API for deck management and card uploads
+- Structured JSON formats for reliable data exchange
+- Proper error handling with graceful fallbacks
+
+### Data Management
+
+- Clean state management for cards
+- Deck synchronization with Mochi
+- Data sanitization to prevent security issues
+- Proper escaping and formatting for exports
+
+### UI Interaction
+
+- Text highlighting triggers generation
+- Real-time inline editing of cards
+- Responsive design with resizable panels
+- Modal-based interfaces for critical actions
+
+## Environment Setup
+
+- Run with `npm start`
+- Requires Claude API key in environment variable `ANTHROPIC_API_KEY`
+- Optional Mochi API key in environment variable `MOCHI_API_KEY`
+- Server runs on port 3000 by default
+
+## Common Commands
+
+```bash
+# Start the server
+npm start
+
+# Run in development mode with auto-restart
+npm run dev
+```
+
+## Notes on Development
+
+- Card quality depends heavily on Claude's understanding of the text and spaced repetition principles
+- Mochi API integration requires proper authentication and error handling
+- The application gracefully degrades when APIs are unavailable
+- Mobile-responsive design ensures usability on different devices
+
+## Future Enhancements
+
+- PDF and EPUB text extraction
+- Integration with additional spaced repetition systems
+- Improved authentication flow for Mochi
+- Offline functionality with local storage
+- Customizable card templates
+>>>> VERCEL_DEPLOYMENT.md
+# Flash Card Generator - Vercel Deployment Guide
+
+This document provides instructions for deploying the Flash Card Generator application to Vercel.
+
+## Important Files
+
+The application now uses a modular serverless architecture for Vercel:
+
+1. `/api/*.js` - Individual serverless functions for each API endpoint
+2. `/vercel.json` - Vercel-specific configuration
+3. `/src/` - Static frontend files
+
+Each API endpoint is implemented as a standalone serverless function:
+- `/api/health.js` - Simple health check endpoint
+- `/api/analyze-text.js` - Text analysis with Claude
+- `/api/generate-cards.js` - Flashcard generation with Claude
+- `/api/mochi-decks.js` - Fetch decks from Mochi
+- `/api/upload-to-mochi.js` - Upload cards to Mochi
+
+## Deployment Steps
+
+1. **Push your code to GitHub**
+
+2. **Connect to Vercel**
+   - Create a Vercel account if you don't have one
+   - Connect your GitHub repository
+   - Click "Import"
+
+3. **Project Configuration**
+   - Framework Preset: Leave as "Other"
+   - Build Command: `npm run build`
+   - Output Directory: Leave blank (default)
+   - Install Command: `npm install`
+   - Development Command: `npm run dev`
+
+4. **Click "Deploy"**
+
+## Client-Side API Keys
+
+This application is designed to work with client-side API keys:
+
+1. **No Environment Variables Needed**
+   - Users will input their own API keys in the application settings
+   - These are stored in the user's browser localStorage
+   - No server-side environment variables are required for the APIs
+
+2. **API Key Security**
+   - The application only passes API keys to their respective services
+   - API keys are never stored on the server
+
+## Vercel Serverless Optimizations
+
+The Vercel deployment has been optimized for serverless functions:
+
+1. **Standalone Functions**
+   - Each API endpoint is a completely standalone function
+   - No dependencies on shared server code
+   - Faster cold starts and more reliable execution
+
+2. **Resource Limits**
+   - Memory: 1024MB allocated per function
+   - Max Duration: 10 seconds (prevents function timeouts)
+   - API calls have internal timeouts to gracefully handle long-running requests
+
+3. **Error Handling**
+   - Improved error responses with helpful messages
+   - Fallback decks provided when Mochi integration fails
+   - Timeout errors clearly communicated to the user
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. **Test Individual Endpoints**
+   - Visit `/api/health` to verify the API is running
+   - Each endpoint has proper error handling and status codes
+
+2. **Check Vercel Logs**
+   - Detailed logs are available in the Vercel dashboard
+   - Each function logs important information about its operation
+
+3. **Browser Console**
+   - The client application includes detailed error logging
+   - Check the browser console for specific error messages
+
+4. **CORS Issues**
+   - All CORS headers are properly set for cross-origin requests
+   - Preflight OPTIONS requests are properly handled
+>>>> Procfile
+web: node server/server.js
+>>>> api/generate-cards.js
+// Vercel serverless function for generating flashcards
+const axios = require('axios');
+
+// Import shared prompts and API configuration
+const { API_CONFIG } = require('../prompts');
+
+// Helper function to truncate text
+function truncateText(text, maxLength = 8000) {
+  if (!text || text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '... [truncated]';
+}
+
+// Vercel serverless function handler
+module.exports = async (req, res) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Only handle POST requests
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { text, textContext, deckOptions, userApiKey } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    if (!userApiKey) {
+      return res.status(400).json({ error: 'No API key provided. Please add your Claude API key in settings.' });
+    }
+
+    const truncatedText = truncateText(text, 8000);
+
+    const userPrompt = `Please create spaced repetition flashcards from the SELECTED TEXT below.
+Use the guidelines from the system prompt.
+
+Available deck categories: ${deckOptions || "General"}
+
+Remember to return ONLY a valid JSON array of flashcard objects matching the required format.
+
+PRIMARY FOCUS - Selected Text (create cards from this):
+${truncatedText}
+
+${textContext ? `OPTIONAL BACKGROUND - Document Context (extract any relevant context from this to make your cards standalone):
+${truncateText(textContext, 1500)}` : ''}`;
+
+    const payload = {
+      model: API_CONFIG.CLAUDE_MODEL,
+      system: API_CONFIG.PROMPTS.CARDS,
+      messages: [{ role: 'user', content: userPrompt }],
+      max_tokens: 4000
+    };
+
+    // Call Claude API with reduced timeout to prevent Vercel function timeout
+    try {
+      const response = await axios({
+        method: 'post',
+        url: API_CONFIG.ANTHROPIC_API_URL,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': userApiKey,
+          'anthropic-version': API_CONFIG.ANTHROPIC_VERSION
+        },
+        data: payload,
+        timeout: 9000 // 9 second timeout to fit within Vercel's 10s limit
+      });
+
+      return res.status(200).json(response.data);
+    } catch (apiError) {
+      // Handle axios errors
+      if (apiError.code === 'ECONNABORTED') {
+        return res.status(504).json({ error: 'Request to Claude API timed out. Try a smaller text selection.' });
+      }
+
+      if (apiError.response) {
+        // The request was made and the server responded with a non-2xx status
+        return res.status(apiError.response.status).json({
+          error: `Claude API Error: ${JSON.stringify(apiError.response.data)}`
+        });
+      } else if (apiError.request) {
+        // The request was made but no response was received
+        return res.status(500).json({ error: 'No response received from Claude API' });
+      } else {
+        // Something happened in setting up the request
+        return res.status(500).json({ error: `Error setting up request: ${apiError.message}` });
+      }
+    }
+  } catch (error) {
+    console.error('Server error during card generation:', error);
+    return res.status(500).json({ error: `Unexpected error: ${error.message}` });
+  }
+};
+>>>> api/analyze-text.js
+// Vercel serverless function for text analysis
+const axios = require('axios');
+
+// Import shared prompts and API configuration
+const { API_CONFIG } = require('../prompts');
+
+// Helper function to truncate text
+function truncateText(text, maxLength = 8000) {
+  if (!text || text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '... [truncated]';
+}
+
+// Vercel serverless function handler
+module.exports = async (req, res) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Only handle POST requests
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { text, userApiKey } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    if (!userApiKey) {
+      return res.status(400).json({ error: 'No API key provided. Please add your Claude API key in settings.' });
+    }
+
+    const truncatedText = truncateText(text, 10000);
+
+    const userPrompt = `Please analyze this text and provide a concise contextual summary (1-2 paragraphs maximum):
+
+${truncatedText}`;
+
+    const payload = {
+      model: API_CONFIG.CLAUDE_MODEL,
+      system: API_CONFIG.PROMPTS.ANALYSIS,
+      messages: [{ role: 'user', content: userPrompt }],
+      max_tokens: 1000
+    };
+
+    try {
+      const response = await axios({
+        method: 'post',
+        url: API_CONFIG.ANTHROPIC_API_URL,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': userApiKey,
+          'anthropic-version': API_CONFIG.ANTHROPIC_VERSION
+        },
+        data: payload,
+        timeout: 9000 // 9 second timeout
+      });
+
+      return res.status(200).json(response.data);
+    } catch (apiError) {
+      // Handle axios errors
+      if (apiError.code === 'ECONNABORTED') {
+        return res.status(504).json({ error: 'Request to Claude API timed out. Try with a smaller text.' });
+      }
+
+      if (apiError.response) {
+        // The request was made and the server responded with a non-2xx status
+        return res.status(apiError.response.status).json({
+          error: `Claude API Error: ${JSON.stringify(apiError.response.data)}`
+        });
+      } else if (apiError.request) {
+        // The request was made but no response was received
+        return res.status(500).json({ error: 'No response received from Claude API' });
+      } else {
+        // Something happened in setting up the request
+        return res.status(500).json({ error: `Error setting up request: ${apiError.message}` });
+      }
+    }
+  } catch (error) {
+    console.error('Server error during text analysis:', error);
+    return res.status(500).json({ error: `Unexpected error: ${error.message}` });
+  }
+};
+>>>> api/index.js
+// Simple API status check endpoint
+module.exports = (req, res) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 200;
+    return res.end();
+  }
+
+  // Serve status info
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({
+    status: 'ok',
+    message: 'Flash Card Generator API is running. Client-side API keys required.',
+    apis: {
+      claude: 'Connected via /api/analyze-text and /api/generate-cards',
+      mochi: 'Connected via /api/mochi-decks and /api/upload-to-mochi'
+    },
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  }));
+};
+>>>> api/upload-to-mochi.js
+// Vercel serverless function for uploading cards to Mochi
+const axios = require('axios');
+
+// Vercel serverless function handler
+module.exports = async (req, res) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Only handle POST requests
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { cards, userMochiKey } = req.body;
+
+    if (!cards || !Array.isArray(cards)) {
+      return res.status(400).json({ error: 'Cards array is required' });
+    }
+
+    if (!userMochiKey) {
+      return res.status(400).json({ error: 'No Mochi API key provided. Please add your API key in settings.' });
+    }
+
+    console.log('Starting Mochi API upload');
+
+    // Mochi uses HTTP Basic Auth with API key followed by colon
+    const authString = `${userMochiKey}:`;
+    const base64Auth = Buffer.from(authString).toString('base64');
+
+    // Upload each card to Mochi
+    const results = [];
+
+    for (const card of cards) {
+      try {
+        // Log limited card info for debugging
+        const cardInfo = {
+          'content': card.content ? card.content.substring(0, 20) + '...' : 'No content',
+          'deck-id': card['deck-id'] || 'No deck ID'
+        };
+        console.log('Uploading card to Mochi:', JSON.stringify(cardInfo));
+
+        try {
+          // Make API request with axios
+          const response = await axios({
+            method: 'post',
+            url: 'https://app.mochi.cards/api/cards/',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Basic ${base64Auth}`
+            },
+            data: {
+              'content': card.content,
+              'deck-id': card['deck-id']
+            },
+            timeout: 5000 // 5 second timeout
+          });
+
+          // Successful response
+          results.push({
+            success: true,
+            id: response.data?.id || 'unknown'
+          });
+        } catch (apiError) {
+          // Handle axios errors
+          if (apiError.code === 'ECONNABORTED') {
+            results.push({ success: false, error: 'Upload timeout. Try again.' });
+          } else if (apiError.response) {
+            // The request was made and the server responded with a non-2xx status
+            results.push({
+              success: false,
+              error: `Mochi API Error: ${JSON.stringify(apiError.response.data)}`,
+              status: apiError.response.status
+            });
+          } else if (apiError.request) {
+            // The request was made but no response was received
+            results.push({ success: false, error: 'No response received from Mochi API' });
+          } else {
+            // Something happened in setting up the request
+            results.push({ success: false, error: `Error: ${apiError.message}` });
+          }
+        }
+      } catch (cardError) {
+        console.error('Error processing card for Mochi upload:', cardError);
+        results.push({ success: false, error: `Card processing error: ${cardError.message}` });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      results: results,
+      totalSuccess: results.filter(r => r.success).length,
+      totalCards: cards.length
+    });
+
+  } catch (error) {
+    console.error('Server error during Mochi upload:', error);
+    return res.status(500).json({ error: `Unexpected error: ${error.message}` });
+  }
+};
+>>>> api/mochi-decks.js
+// Vercel serverless function for fetching Mochi decks
+const axios = require('axios');
+
+// Vercel serverless function handler
+module.exports = async (req, res) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Only handle GET requests
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    // Get Mochi API key from query parameter
+    const mochiApiKey = req.query.userMochiKey;
+
+    // Always provide fallback decks
+    const fallbackDecks = { "General": "general" };
+
+    if (!mochiApiKey) {
+      return res.status(400).json({
+        error: 'No Mochi API key provided. Please add your API key in settings.',
+        fallbackDecks: fallbackDecks
+      });
+    }
+
+    // Mochi uses HTTP Basic Auth with API key followed by colon
+    const authString = `${mochiApiKey}:`;
+    const base64Auth = Buffer.from(authString).toString('base64');
+
+    try {
+      // Fetch decks from Mochi API
+      const response = await axios({
+        method: 'get',
+        url: 'https://app.mochi.cards/api/decks/',
+        headers: {
+          'Authorization': `Basic ${base64Auth}`
+        },
+        timeout: 5000 // 5 second timeout
+      });
+
+      // Transform data for client use
+      const formattedDecks = {};
+
+      if (response.data && response.data.docs) {
+        // Filter out trashed and archived decks
+        const activeDeckCount = response.data.docs.length;
+        let activeDecksCount = 0;
+
+        response.data.docs.forEach(deck => {
+          // Skip decks that are in trash or archived
+          if (deck['trashed?'] || deck['archived?']) {
+            return; // Skip this deck
+          }
+
+          // Only include active decks
+          activeDecksCount++;
+
+          // Remove [[ ]] if present in the ID
+          const cleanId = deck.id.replace(/\[\[|\]\]/g, '');
+          formattedDecks[deck.name] = cleanId;
+        });
+
+        console.log(`Loaded ${activeDecksCount} active decks out of ${activeDeckCount} total decks from Mochi API`);
+
+        return res.status(200).json({
+          success: true,
+          decks: formattedDecks,
+          deckCount: activeDecksCount
+        });
+      } else {
+        // Invalid response structure
+        return res.status(200).json({
+          success: true,
+          decks: fallbackDecks,
+          deckCount: 1,
+          message: 'Using fallback deck (General) due to unexpected Mochi API response format'
+        });
+      }
+    } catch (apiError) {
+      console.error('Error fetching from Mochi API:', apiError.message);
+
+      // Handle axios errors
+      if (apiError.code === 'ECONNABORTED') {
+        return res.status(200).json({
+          success: true,
+          message: 'Mochi API request timed out. Using fallback decks.',
+          decks: fallbackDecks,
+          deckCount: 1
+        });
+      }
+
+      // Return fallback decks even on error
+      return res.status(200).json({
+        success: true,
+        message: `Error connecting to Mochi: ${apiError.message}. Using fallback decks.`,
+        decks: fallbackDecks,
+        deckCount: 1
+      });
+    }
+  } catch (error) {
+    console.error('Error in Mochi decks endpoint:', error);
+
+    // Always return a 200 with fallback decks
+    return res.status(200).json({
+      success: true,
+      message: 'Error processing request. Using fallback decks.',
+      decks: { "General": "general" },
+      deckCount: 1
+    });
+  }
+};
+>>>> api/health.js
+// Simple health check endpoint for Vercel
+module.exports = (req, res) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Respond with status
+  return res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    message: 'Flash Card Generator API is running. Client-side API keys required.'
+  });
+};
+>>>> package.json
+{
+  "name": "spaced-rep",
+  "version": "1.0.0",
+  "description": "Spaced repetition flashcard generator using Claude 3.7",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "nodemon server/server.js",
+    "build": "echo 'Build completed'"
+  },
+  "dependencies": {
+    "axios": "^1.8.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "node-fetch": "^2.6.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
+
+>>>> README.md
+# Flash Card Generator
+
+A streamlined web application for creating high-quality spaced repetition flashcards using Claude 3.7, featuring direct Mochi integration and a mobile-responsive interface.
+
+## Features
+
+- **Spaced Repetition Cards**
+  - Paste text and highlight sections to create flashcards
+  - Uses Claude 3.7 to generate effective cards following best practices
+  - Cards are automatically categorized into appropriate Mochi decks
+  - Edit cards inline before exporting
+
+- **Mochi Integration**
+  - Dynamic deck fetching from your Mochi account
+  - Direct upload to Mochi without file handling
+  - Fallback to markdown export if API is unavailable
+  - Properly handles deck organization (excludes trashed/archived)
+
+- **Modern User Interface**
+  - Clean, intuitive design with dropdown menu
+  - Mobile-responsive layout
+  - Real-time notification system
+  - Confirmation modals for destructive actions
+  - Resizable split panels for comfortable editing
+  - Compact card design for efficient space utilization
+
+## Getting Started
+
+### Prerequisites
+
+- Modern web browser
+- Claude API key from Anthropic
+- (Optional) Mochi API key for direct integration
+
+### Running Locally
+
+1. Clone this repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Set your API keys as environment variables:
+   ```bash
+   # Required for card generation
+   export ANTHROPIC_API_KEY=your-claude-api-key-here
+
+   # Optional for direct Mochi integration
+   export MOCHI_API_KEY=your-mochi-api-key-here
+   ```
+4. Start the server:
+   ```bash
+   npm start
+   ```
+5. Open your browser to `http://localhost:3000`
+
+### Environment Variables
+
+The application uses the following environment variables:
+
+- `ANTHROPIC_API_KEY`: Required for Claude 3.7 API access
+- `MOCHI_API_KEY`: Optional for Mochi integration (direct deck fetching and upload)
+- `PORT`: Optional server port (defaults to 3000)
+
+## How to Use
+
+### Creating Flashcards
+
+1. Paste text into the input area
+2. Highlight a section of text
+3. Click "Create Cards"
+4. Review and edit the generated cards
+5. Optionally change the deck for any card by clicking the deck label
+6. Use the dropdown menu to export to Mochi or as markdown
+
+## Design Principles
+
+This application follows established principles for effective spaced repetition learning:
+
+- **Atomicity**: Each card tests one specific concept
+- **Clarity**: Cards use precise language focused on understanding
+- **Connections**: Building relationships between concepts
+- **Deep Understanding**: Emphasizing "why" and "how" questions
+
+The UI design prioritizes:
+
+- Simplicity and focus on the core functionality
+- Mobile-responsive layout that works on any device
+- Space efficiency with compact card design
+- Intuitive interactions with minimal learning curve
+
+## License
+
+MIT
+>>>> server/server.js
+/**
+ * Flash Cards Generator API Server
+ *
+ * Provides endpoints for generating flashcards using Claude API
+ * and integrating with Mochi Cards
+ */
+
+// Load .env file if present (for local development only)
+try {
+  require('dotenv').config();
+} catch (e) {
+  console.log('dotenv not installed, continuing without it');
+}
+
+// Note: This application uses client-side API keys passed with each request
+// rather than storing them in environment variables
+
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const fetch = require('node-fetch');
+
+// Import shared prompts and API configuration
+const { API_CONFIG } = require('../prompts');
+
+/**
+ * Helper function to truncate text to a reasonable size
+ * @param {string} text - Text to truncate
+ * @param {number} maxLength - Maximum length
+ * @returns {string} Truncated text
+ */
+function truncateText(text, maxLength = 8000) {
+  if (!text || text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '... [truncated]';
+}
+
+/**
+ * Helper to call Claude API with consistent options
+ * @param {string} systemPrompt - System prompt
+ * @param {string} userPrompt - User prompt
+ * @param {string} apiKey - Claude API key
+ * @param {number} maxTokens - Maximum tokens for response
+ * @returns {Promise<Object>} Claude API response
+ */
+async function callClaudeApi(systemPrompt, userPrompt, apiKey, maxTokens = 4000) {
+  if (!apiKey) {
+    throw new Error('API key not configured. Please provide a Claude API key.');
+  }
+
+  const payload = {
+    model: API_CONFIG.CLAUDE_MODEL,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+    max_tokens: maxTokens
+  };
+
+  // Log the request for debugging
+  console.log(`\n===== CLAUDE API REQUEST =====`);
+  console.log('SYSTEM:', systemPrompt.substring(0, 100) + '...');
+  console.log('USER PROMPT:', userPrompt.substring(0, 100) + '...');
+  console.log('==============================\n');
+
+  // Set timeout for Vercel serverless functions (10 seconds)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch(API_CONFIG.ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': API_CONFIG.ANTHROPIC_VERSION
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      let errorMessage = 'Unknown Claude API error';
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error?.message || 'Unknown Claude API error';
+      } catch (e) {
+        errorMessage = await response.text() || 'Could not parse error response';
+      }
+      throw new Error(`Claude API Error: ${errorMessage}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Claude API request timed out. Try again or use a smaller text selection.');
+    }
+    throw error;
+  }
+}
+
+// Initialize Express app
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Configure middleware
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'https://spaced-rep.vercel.app',
+    'https://spaced-rep-ten.vercel.app',
+    'https://pod-prep.com',
+    'https://www.generateflash.cards',
+    'https://generateflash.cards',
+    new RegExp(/https:\/\/.*\.vercel\.app/)
+  ],
+  credentials: true
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.static(path.join(__dirname, '../src')));
+
+// Add middleware for request logging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
+
+// CLAUDE API ENDPOINTS
+
+// API endpoint for text analysis
+app.post('/api/analyze-text', async (req, res) => {
+  try {
+    const { text, userApiKey } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    // Use user-provided API key only
+    const apiKey = userApiKey;
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'No API key provided. Please add your API key in settings.' });
+    }
+
+    const truncatedText = truncateText(text, 10000);
+
+    const userPrompt = `Please analyze this text and provide a concise contextual summary (1-2 paragraphs maximum):
+
+${truncatedText}`;
+
+    const claudeResponse = await callClaudeApi(
+      API_CONFIG.PROMPTS.ANALYSIS,
+      userPrompt,
+      apiKey,
+      1000
+    );
+
+    res.json(claudeResponse);
+  } catch (error) {
+    console.error('Server error during text analysis:', error);
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
+// API endpoint for generating flashcards
+app.post('/api/generate-cards', async (req, res) => {
+  try {
+    const { text, textContext, deckOptions, userApiKey } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    // Use user-provided API key only
+    const apiKey = userApiKey;
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'No API key provided. Please add your API key in settings.' });
+    }
+
+    const userPrompt = `Please create spaced repetition flashcards from the SELECTED TEXT below.
+Use the guidelines from the system prompt.
+
+Available deck categories: ${deckOptions || Object.keys(req.body.deckMap || {}).join(', ') || "General"}
+
+Remember to return ONLY a valid JSON array of flashcard objects matching the required format.
+
+PRIMARY FOCUS - Selected Text (create cards from this):
+${truncateText(text)}
+
+${textContext ? `OPTIONAL BACKGROUND - Document Context (extract any relevant context from this to make your cards standalone):
+${textContext}` : ''}`;
+
+    const claudeResponse = await callClaudeApi(
+      API_CONFIG.PROMPTS.CARDS,
+      userPrompt,
+      apiKey,
+      4000
+    );
+
+    // Log the response for debugging
+    console.log('Claude API response structure:', Object.keys(claudeResponse));
+    if (claudeResponse.content) {
+      console.log('Content types:', claudeResponse.content.map(item => item.type).join(', '));
+    }
+
+    res.json(claudeResponse);
+  } catch (error) {
+    console.error('Server error during card generation:', error);
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
+
+// MOCHI API ENDPOINTS
+
+// API endpoint to fetch decks from Mochi
+app.get('/api/mochi-decks', async (req, res) => {
+  try {
+    // Get Mochi API key from query parameter only
+    const mochiApiKey = req.query.userMochiKey;
+    if (!mochiApiKey) {
+      return res.status(400).json({
+        error: 'No Mochi API key provided. Please add your API key in settings.',
+        fallbackDecks: { "General": "general" }
+      });
+    }
+
+    // Mochi uses HTTP Basic Auth with API key followed by colon
+    const base64ApiKey = Buffer.from(`${mochiApiKey}:`).toString('base64');
+    const authToken = `Basic ${base64ApiKey}`;
+
+    // Set timeout for Vercel serverless functions (5 seconds)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    try {
+      // Fetch decks from Mochi API
+      const response = await fetch('https://app.mochi.cards/api/decks/', {
+        method: 'GET',
+        headers: {
+          'Authorization': authToken
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Mochi API Error: ${errorText}`);
+      }
+
+      const decksData = await response.json();
+
+    // Transform data for client use
+    const formattedDecks = {};
+
+    // Filter out trashed and archived decks
+    const activeDeckCount = decksData.docs.length;
+    let activeDecksCount = 0;
+
+    decksData.docs.forEach(deck => {
+      // Skip decks that are in trash or archived
+      if (deck['trashed?'] || deck['archived?']) {
+        return; // Skip this deck
+      }
+
+      // Only include active decks
+      activeDecksCount++;
+
+      // Remove [[ ]] if present in the ID
+      const cleanId = deck.id.replace(/\[\[|\]\]/g, '');
+      formattedDecks[deck.name] = cleanId;
+    });
+
+    console.log(`Loaded ${activeDecksCount} active decks out of ${activeDeckCount} total decks from Mochi API`);
+
+    res.json({
+      success: true,
+      decks: formattedDecks,
+      deckCount: activeDecksCount
+    });
+
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error('Mochi API request timed out. Please try again.');
+      }
+      throw error;
+    }
+
+  } catch (error) {
+    console.error('Error fetching Mochi decks:', error);
+    res.status(500).json({
+      error: error.message,
+      fallbackDecks: {
+        "General": "general"
+      }
+    });
+  }
+});
+
+// API endpoint to check server status
+app.get('/api/server-status', (req, res) => {
+  res.json({
+    status: 'ok',
+    clientKeys: true, // This app uses client-side keys, not server environment variables
+    timestamp: new Date().toISOString()
+  });
+});
+
+// API endpoint for direct Mochi integration
+app.post('/api/upload-to-mochi', async (req, res) => {
+  try {
+    const { cards, userMochiKey } = req.body;
+
+    if (!cards || !Array.isArray(cards)) {
+      return res.status(400).json({ error: 'Cards array is required' });
+    }
+
+    // Get Mochi API key from request only
+    const mochiApiKey = userMochiKey;
+    if (!mochiApiKey) {
+      return res.status(400).json({ error: 'No Mochi API key provided. Please add your API key in settings.' });
+    }
+
+    console.log('Starting Mochi API upload');
+
+    // Mochi uses HTTP Basic Auth with API key followed by colon
+    const base64ApiKey = Buffer.from(`${mochiApiKey}:`).toString('base64');
+    const authToken = `Basic ${base64ApiKey}`;
+
+    // Upload each card to Mochi
+    const results = [];
+
+    for (const card of cards) {
+      try {
+        console.log('Uploading card to Mochi:', JSON.stringify({
+          'content': card.content.substring(0, 20) + '...',
+          'deck-id': card['deck-id']
+        }));
+
+        // Use HTTP Basic Auth header format
+        const response = await fetch('https://app.mochi.cards/api/cards/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': authToken
+          },
+          body: JSON.stringify({
+            'content': card.content,
+            'deck-id': card['deck-id']
+          })
+        });
+
+        const responseText = await response.text();
+        console.log('Mochi API response:', response.status, responseText.substring(0, 100));
+
+        if (response.ok) {
+          let responseData;
+          try {
+            responseData = JSON.parse(responseText);
+            results.push({ success: true, id: responseData.id });
+          } catch (jsonError) {
+            console.error('Error parsing JSON response:', jsonError);
+            results.push({ success: true, response: responseText });
+          }
+        } else {
+          results.push({ success: false, error: responseText, status: response.status });
+        }
+      } catch (cardError) {
+        console.error('Error uploading to Mochi:', cardError);
+        results.push({ success: false, error: cardError.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      results: results,
+      totalSuccess: results.filter(r => r.success).length,
+      totalCards: cards.length
+    });
+
+  } catch (error) {
+    console.error('Server error during Mochi upload:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// UTILITY ENDPOINTS
+
+// Health check route for Vercel
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    message: 'API server is running. Remember to add your API keys in the settings.'
+  });
+});
+
+// Serve the main app
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../src/index.html'));
+});
+
+// Start server if not in Vercel serverless environment
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+// Export the Express API for Vercel serverless deployment
+module.exports = app;
+>>>> index.js
+// Vercel entry point - redirects to the actual server file
+require('./server/server.js');
+>>>> vercel.json
+{
+  "version": 2
+}
+>>>> prompts.js
+/**
+ * Shared prompts for Claude API
+ * Used by both server.js and API endpoints
+ */
+
+const PROMPTS = {
+  CARDS: `You are an expert in creating high-quality spaced repetition flashcards.
+Your task is to generate effective flashcards from the highlighted text excerpt, with the full text provided for context.
+
+Guidelines for creating excellent flashcards:
+• Be EXTREMELY concise - answers should be 1-2 sentences maximum!
+• Focus on core concepts, relationships, and techniques rather than trivia or isolated facts
+• Break complex ideas into smaller, atomic concepts
+• Ensure each card tests one specific idea (atomic)
+• Front of card should ask a specific question that prompts recall
+• Back of card should provide the shortest possible complete answer
+• CRITICAL: Keep answers as brief as possible while maintaining accuracy - aim for 10-25 words max
+• When referencing the author or source, use their specific name rather than general phrases like "the author" or "this text" which won't make sense months later when the user is reviewing the cards
+• Try to cite the author or the source when discussing something that is not an established concept but rather a new take or theory or prediction.
+• The questions should be precise and unambiguously exclude alternative correct answers
+• The questions should encode ideas from multiple angles
+• Avoid yes/no question, or, in general, questions that admit a binary answer
+• Avoid unordered lists of items (especially if they contain many items)
+• If quantities are involved, they should be relative, or the unit of measure should be specified in the question
+
+You will also analyze the content and suggest an appropriate deck category.
+The specific deck options will be dynamically determined and provided in the user message.
+
+CRITICAL: You MUST ALWAYS output your response as a valid JSON array of card objects. NEVER provide any prose, explanation or markdown formatting.
+
+Each card object must have the following structure:
+
+{
+  "front": "The question or prompt text goes here",
+  "back": "The answer or explanation text goes here",
+  "deck": "One of the deck categories listed above"
+}
+
+Example of expected JSON format:
+
+[
+  {
+    "front": "What is the primary function of X?",
+    "back": "X enables Y through mechanism Z.",
+    "deck": "CS/Hardware"
+  },
+  {
+    "front": "Why is concept A important in the context of B?",
+    "back": "A enables process C and prevents problem D.",
+    "deck": "Math/Physics"
+  }
+]
+
+Generate between 1-5 cards depending on the complexity and amount of content in the highlighted text.
+Your response MUST BE ONLY valid JSON - no introduction, no explanation, no markdown formatting.`,
+
+  ANALYSIS: `You analyze text to extract key contextual information. Create a concise 1-2 paragraph summary that includes: the author/source if identifiable, the main thesis or argument, key points, and relevant background. This summary will serve as context for future interactions with sections of this text.`
+};
+
+// Export for server.js and API endpoints
+module.exports = {
+  PROMPTS,
+
+  // Common API configuration
+  API_CONFIG: {
+    ANTHROPIC_API_URL: "https://api.anthropic.com/v1/messages",
+    CLAUDE_MODEL: "claude-3-7-sonnet-20250219",
+    ANTHROPIC_VERSION: "2023-06-01",
+    PROMPTS
+  }
+};H

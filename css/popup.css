@@ -1,0 +1,377 @@
+body {
+  width: 500px; /* Increased from 400px */
+  max-height: 700px; /* Increased from 600px */
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.container {
+  padding: 15px;
+}
+
+h1 {
+  font-size: 18px;
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #4285f4;
+}
+
+/* Controls */
+.controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+button {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+button:hover {
+  background-color: #e0e0e0;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#enableMarking {
+  background-color: #4caf50;
+  color: white;
+}
+
+#disableMarking {
+  background-color: #f44336;
+  color: white;
+}
+
+.status {
+  margin-bottom: 15px;
+}
+
+.enabled {
+  color: #4caf50;
+  font-weight: bold;
+}
+
+.disabled {
+  color: #f44336;
+  font-weight: bold;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 15px;
+}
+
+.tab-btn {
+  padding: 8px 15px;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  font-weight: normal;
+}
+
+.tab-btn.active {
+  border-bottom-color: #4285f4;
+  font-weight: bold;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* Marked texts */
+.marked-count, .cards-count {
+  margin-bottom: 10px;
+  font-weight: bold;
+}
+
+.marked-list, .cards-list {
+  max-height: 400px; /* Increased from 300px */
+  overflow-y: auto;
+  margin-bottom: 15px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+}
+
+.marked-item, .card-item {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  position: relative;
+}
+
+.card-item {
+  transition: background-color 0.2s ease;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  margin-bottom: 8px;
+  padding: 15px 10px;
+  border: 1px solid #e0e0e0;
+}
+
+.card-item:hover {
+  background-color: #f5f9ff;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+}
+
+.marked-item:last-child, .card-item:last-child {
+  border-bottom: none;
+}
+
+.marked-text, .card-front {
+  font-weight: bold;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #1a73e8;
+}
+
+.marked-source, .card-deck {
+  font-size: 12px;
+  color: #666;
+  margin-top: 8px;
+}
+
+.card-back {
+  font-size: 13px;
+  color: #333;
+  margin: 10px 0;
+  line-height: 1.4; /* Improved readability */
+  max-height: 300px;
+  overflow-y: auto;
+  background-color: #f9f9f9;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.remove-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background-color: #f44336;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  padding: 0;
+  line-height: 1;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: all 0.2s ease;
+  z-index: 10; /* Ensure it's above card content */
+}
+
+.remove-btn:hover {
+  background-color: #d32f2f;
+  transform: scale(1.1);
+}
+
+.edit-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+  background-color: #4285f4;
+  color: white;
+  margin-right: 25px;
+}
+
+.empty-message {
+  padding: 15px;
+  color: #666;
+  font-style: italic;
+  text-align: center;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+#generateCards, #exportCards, #saveSettings {
+  background-color: #4285f4;
+  color: white;
+  flex-grow: 1;
+  margin-right: 10px;
+}
+
+#clearTexts, #clearCards {
+  background-color: #f44336;
+  color: white;
+}
+
+/* Settings */
+.setting-group {
+  margin-bottom: 15px;
+}
+
+.setting-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.setting-group input[type="password"],
+.setting-group input[type="text"] {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.setting-group.checkbox {
+  display: flex;
+  align-items: center;
+}
+
+.setting-group.checkbox label {
+  font-weight: normal;
+  margin-bottom: 0;
+  margin-left: 5px;
+}
+
+.api-key-error {
+  color: #f44336;
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+/* Modal */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.5);
+  z-index: 1000;
+  overflow: auto;
+}
+
+.modal-content {
+  background-color: white;
+  margin: 10% auto;
+  padding: 20px;
+  border-radius: 5px;
+  width: 90%; /* Increased from 80% */
+  max-width: 600px; /* Increased from 500px */
+  position: relative;
+}
+
+.close {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.card-editor {
+  margin-bottom: 15px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.form-group textarea,
+.form-group input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+/* Increase textarea heights for better editing */
+#cardFront {
+  min-height: 60px; /* Increased from default */
+}
+
+#cardBack {
+  min-height: 120px; /* Increased from default */
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+#saveCard {
+  background-color: #4285f4;
+  color: white;
+}
+
+#cancelEdit {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+/* Export options */
+.export-options {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+}
+
+.export-option {
+  flex: 1;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  padding: 10px;
+  cursor: pointer;
+  text-align: center;
+  border: 1px solid #ddd;
+  transition: all 0.2s ease;
+}
+
+.export-option:hover {
+  background-color: #f0f0f0;
+  border-color: #ccc;
+}
+
+.export-option.selected {
+  background-color: #e6f0ff;
+  border-color: #4285f4;
+}
+
+.export-option h3 {
+  margin: 0 0 5px 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.export-option p {
+  margin: 0;
+  font-size: 12px;
+  color: #666;
+}

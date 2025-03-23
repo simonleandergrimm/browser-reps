@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Text Marker</title>
+  <link rel="stylesheet" href="../css/popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Text Marker for Mochi Cards</h1>
+    
+    <!-- Toggle controls -->
+    <div class="controls">
+      <button id="enableMarking">Enable Marking</button>
+      <button id="disableMarking">Disable Marking</button>
+    </div>
+    <div class="status">
+      <p>Status: <span id="status">Disabled</span></p>
+    </div>
+    
+    <!-- Tabs navigation -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="marked-texts">Marked Texts</button>
+      <button class="tab-btn" data-tab="generated-cards">Mochi Cards</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
+    </div>
+    
+    <!-- Marked texts tab -->
+    <div class="tab-content active" id="marked-texts">
+      <div class="marked-count">Marked texts: <span id="markedCount">0</span></div>
+      <div class="marked-list" id="markedTextsList"></div>
+      <div class="actions">
+        <button id="generateCards" disabled>Generate Mochi Cards</button>
+        <button id="clearTexts">Clear All</button>
+      </div>
+    </div>
+    
+    <!-- Generated cards tab -->
+    <div class="tab-content" id="generated-cards">
+      <div class="cards-count">Cards: <span id="cardsCount">0</span></div>
+      <div class="cards-list" id="cardsList"></div>
+      <div class="actions">
+        <button id="exportCards" disabled>Export to Mochi</button>
+        <button id="clearCards">Clear All</button>
+      </div>
+    </div>
+    
+    <!-- Settings tab -->
+    <div class="tab-content" id="settings">
+      <div class="setting-group">
+        <label for="anthropicApiKey">Claude API Key:</label>
+        <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
+        <div class="api-key-error" id="claudeApiKeyError"></div>
+      </div>
+      <div class="setting-group">
+        <label for="mochiApiKey">Mochi API Key (optional):</label>
+        <input type="password" id="mochiApiKey" placeholder="Optional - for direct export to Mochi">
+        <div class="api-key-error" id="mochiApiKeyError"></div>
+      </div>
+      <div class="setting-group checkbox">
+        <input type="checkbox" id="storeLocally" checked>
+        <label for="storeLocally">Store API keys locally</label>
+      </div>
+      <div class="actions">
+        <button id="saveSettings">Save Settings</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Card editor modal -->
+  <div id="cardEditorModal" class="modal">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h2>Edit Card</h2>
+      <div class="card-editor">
+        <div class="form-group">
+          <label for="cardFront">Front (Question):</label>
+          <textarea id="cardFront" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="cardBack">Back (Answer):</label>
+          <textarea id="cardBack" rows="5"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="cardDeck">Deck:</label>
+          <input type="text" id="cardDeck" value="General">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="saveCard">Save Card</button>
+        <button id="cancelEdit">Cancel</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Export modal -->
+  <div id="exportModal" class="modal">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h2>Export Cards</h2>
+      <div class="export-options">
+        <div class="export-option" id="exportMarkdown">
+          <h3>Export as Markdown</h3>
+          <p>Download a markdown file with all cards</p>
+        </div>
+        <div class="export-option" id="exportMochi">
+          <h3>Export to Mochi</h3>
+          <p>Send cards directly to your Mochi account</p>
+        </div>
+      </div>
+      <div id="exportStatus" style="margin-top: 15px; text-align: center;"></div>
+      <div class="modal-actions">
+        <button id="confirmExport">Export</button>
+        <button id="cancelExport">Cancel</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="../js/claude-api.js"></script>
+  <script src="../js/mochi-api.js"></script>
+  <script src="../js/popup.js"></script>
+</body>
+</html>
