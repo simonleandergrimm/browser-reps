@@ -8,17 +8,9 @@ document.addEventListener('DOMContentLoaded', async function() {
   const clearCardsButton = document.getElementById('clearCards');
   const tabButtons = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
-  const cardEditorModal = document.getElementById('cardEditorModal');
-  const cardFrontInput = document.getElementById('cardFront');
-  const cardBackInput = document.getElementById('cardBack');
-  const cardDeckInput = document.getElementById('cardDeck');
-  const saveCardButton = document.getElementById('saveCard');
-  const cancelEditButton = document.getElementById('cancelEdit');
-  const closeModalBtn = document.querySelectorAll('.close');
   
   // App State
   let generatedCards = [];
-  let currentEditingCardIndex = -1;
   
   // Load stored cards
   const loadStoredData = async () => {
@@ -134,65 +126,26 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   });
   
-  // Card editor modal
-  function openCardEditor(cardIndex) {
-    currentEditingCardIndex = cardIndex;
-    const card = generatedCards[cardIndex];
-    
-    cardFrontInput.value = card.front;
-    cardBackInput.value = card.back;
-    cardDeckInput.value = card.deck || 'General';
-    
-    cardEditorModal.style.display = 'block';
-  }
-  
   // Save edited card
-  saveCardButton.addEventListener('click', function() {
-    if (currentEditingCardIndex < 0 || currentEditingCardIndex >= generatedCards.length) {
-      return;
-    }
-    
+  function saveCardEdits(index, frontText, backText, deckText) {
     // Validate inputs
-    const front = cardFrontInput.value.trim();
-    const back = cardBackInput.value.trim();
-    const deck = cardDeckInput.value.trim() || 'General';
+    const front = frontText.trim();
+    const back = backText.trim();
+    const deck = deckText.trim() || 'General';
     
     if (!front || !back) {
       alert('Both front and back are required!');
-      return;
+      return false;
     }
     
     // Update card
-    generatedCards[currentEditingCardIndex] = { front, back, deck };
+    generatedCards[index] = { front, back, deck };
     
     // Save to background storage
     chrome.runtime.sendMessage({action: 'setGeneratedCards', cards: generatedCards});
     
-    // Update UI
-    updateCardsList();
-    
-    // Close modal
-    cardEditorModal.style.display = 'none';
-  });
-  
-  // Cancel editing
-  cancelEditButton.addEventListener('click', function() {
-    cardEditorModal.style.display = 'none';
-  });
-  
-  // Close modal when clicking on X
-  closeModalBtn.forEach(btn => {
-    btn.addEventListener('click', function() {
-      cardEditorModal.style.display = 'none';
-    });
-  });
-  
-  // Close modal when clicking outside
-  window.addEventListener('click', function(event) {
-    if (event.target === cardEditorModal) {
-      cardEditorModal.style.display = 'none';
-    }
-  });
+    return true;
+  }
   
   // Function to generate cards for a specific text
   async function generateCardsForText(text) {
@@ -272,52 +225,126 @@ document.addEventListener('DOMContentLoaded', async function() {
     generatedCards.forEach((card, index) => {
       const cardItem = document.createElement('div');
       cardItem.className = 'card-item';
+      cardItem.dataset.index = index;
       
       // Add special styling for loading and error cards
       if (card.deck === "Loading") {
         cardItem.classList.add('loading-card');
-        cardItem.style.cursor = 'default';
+        
+        const cardFront = document.createElement('div');
+        cardFront.className = 'card-front';
+        cardFront.textContent = card.front;
+        
+        const cardBack = document.createElement('div');
+        cardBack.className = 'card-back';
+        cardBack.textContent = card.back;
+        
+        cardItem.appendChild(cardFront);
+        cardItem.appendChild(cardBack);
+        
       } else if (card.deck === "Error") {
         cardItem.classList.add('error-card');
-        cardItem.style.cursor = 'default';
-      } else {
-        cardItem.style.cursor = 'pointer';
         
-        // Make regular cards clickable for editing
-        cardItem.addEventListener('click', (e) => {
-          // Only trigger if we didn't click the remove button
-          if (!e.target.classList.contains('remove-btn')) {
-            openCardEditor(index);
-          }
+        const cardFront = document.createElement('div');
+        cardFront.className = 'card-front';
+        cardFront.textContent = card.front;
+        
+        const cardBack = document.createElement('div');
+        cardBack.className = 'card-back';
+        cardBack.textContent = card.back;
+        
+        cardItem.appendChild(cardFront);
+        cardItem.appendChild(cardBack);
+        
+      } else {
+        // Create editable front area
+        const cardFront = document.createElement('div');
+        cardFront.className = 'card-front editable';
+        cardFront.contentEditable = true;
+        cardFront.textContent = card.front;
+        cardFront.spellcheck = true;
+        cardFront.dataset.originalText = card.front;
+        
+        // Create editable back area
+        const cardBack = document.createElement('div');
+        cardBack.className = 'card-back editable';
+        cardBack.contentEditable = true;
+        cardBack.textContent = card.back;
+        cardBack.spellcheck = true;
+        cardBack.dataset.originalText = card.back;
+        
+        // Create editable deck field
+        const cardDeckContainer = document.createElement('div');
+        cardDeckContainer.className = 'card-deck-container';
+        
+        const deckLabel = document.createElement('span');
+        deckLabel.className = 'deck-label';
+        deckLabel.textContent = 'Deck: ';
+        
+        const cardDeck = document.createElement('span');
+        cardDeck.className = 'card-deck editable';
+        cardDeck.contentEditable = true;
+        cardDeck.textContent = card.deck || 'General';
+        cardDeck.spellcheck = true;
+        cardDeck.dataset.originalText = card.deck || 'General';
+        
+        cardDeckContainer.appendChild(deckLabel);
+        cardDeckContainer.appendChild(cardDeck);
+        
+        // Add blur event listeners to save changes
+        [cardFront, cardBack, cardDeck].forEach(element => {
+          // Focus event - add editing class
+          element.addEventListener('focus', function() {
+            element.classList.add('editing');
+          });
+          
+          // Blur event - save changes and remove editing class
+          element.addEventListener('blur', function() {
+            element.classList.remove('editing');
+            
+            // If content changed, save it
+            if (element.textContent !== element.dataset.originalText) {
+              const cardIndex = parseInt(cardItem.dataset.index, 10);
+              const frontText = cardFront.textContent;
+              const backText = cardBack.textContent;
+              const deckText = cardDeck.textContent;
+              
+              if (saveCardEdits(cardIndex, frontText, backText, deckText)) {
+                // Update original text
+                element.dataset.originalText = element.textContent;
+              } else {
+                // Revert if validation failed
+                element.textContent = element.dataset.originalText;
+              }
+            }
+          });
+          
+          // Handle enter key to blur
+          element.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              element.blur();
+            }
+          });
         });
+        
+        cardItem.appendChild(cardFront);
+        cardItem.appendChild(cardBack);
+        cardItem.appendChild(cardDeckContainer);
       }
       
-      const cardFront = document.createElement('div');
-      cardFront.className = 'card-front';
-      cardFront.textContent = card.front;
-      
-      const cardBack = document.createElement('div');
-      cardBack.className = 'card-back';
-      cardBack.textContent = card.back.length > 300 ? card.back.substring(0, 300) + '...' : card.back;
-      
-      const cardDeck = document.createElement('div');
-      cardDeck.className = 'card-deck';
-      cardDeck.textContent = `Deck: ${card.deck || 'General'}`;
-      
+      // Add delete button for all cards
       const removeBtn = document.createElement('button');
       removeBtn.className = 'remove-btn';
       removeBtn.innerHTML = '&times;'; // HTML entity for the multiplication sign (×)
       removeBtn.title = 'Remove card';
       removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // Prevent card edit modal from opening
+        e.stopPropagation(); // Prevent default behavior
         generatedCards.splice(index, 1);
         chrome.runtime.sendMessage({action: 'setGeneratedCards', cards: generatedCards});
         updateCardsList();
       });
       
-      cardItem.appendChild(cardFront);
-      cardItem.appendChild(cardBack);
-      cardItem.appendChild(cardDeck);
       cardItem.appendChild(removeBtn);
       cardsList.appendChild(cardItem);
     });

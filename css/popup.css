@@ -189,13 +189,51 @@ button:disabled {
   font-size: 15px;
   color: #333;
   line-height: 1.4;
+  min-height: 24px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
 }
 
-.marked-source, .card-deck {
+.card-front.editable:hover {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.card-front.editable.editing {
+  background-color: rgba(66, 133, 244, 0.05);
+  outline: 1px solid rgba(66, 133, 244, 0.3);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.card-deck-container {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.deck-label {
   font-size: 12px;
   color: #888;
-  margin-top: 8px;
+  margin-right: 4px;
+}
+
+.card-deck {
+  font-size: 12px;
+  color: #666;
   font-style: italic;
+  padding: 2px 4px;
+  border-radius: 3px;
+  min-width: 50px;
+  transition: background-color 0.2s;
+}
+
+.card-deck.editable:hover {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.card-deck.editable.editing {
+  background-color: rgba(66, 133, 244, 0.05);
+  outline: 1px solid rgba(66, 133, 244, 0.3);
 }
 
 .card-back {
@@ -209,6 +247,16 @@ button:disabled {
   padding: 12px;
   border-radius: 4px;
   border-left: 3px solid #e0e0e0;
+  transition: background-color 0.2s;
+}
+
+.card-back.editable:hover {
+  background-color: #f5f5f5;
+}
+
+.card-back.editable.editing {
+  background-color: #f0f5ff;
+  border-left: 3px solid rgba(66, 133, 244, 0.5);
 }
 
 .remove-btn {
