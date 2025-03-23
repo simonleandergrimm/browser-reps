@@ -1,14 +1,13 @@
-# Text Marker Chrome Extension
+# Flashcard Generator Chrome Extension
 
-A Chrome extension that allows users to select and mark text on webpages for generating Mochi flashcards using Claude AI.
+A Chrome extension that generates flashcards from selected webpage text using Claude AI, and exports them to Mochi.
 
 ## Features
 
-- Select text on any webpage to automatically mark it
-- Process marked text with Claude AI to generate flashcards
-- Edit generated flashcards
-- Export flashcards as Markdown for use with Mochi
-- Visual highlighting of marked text
+- Select text on any webpage and generate flashcards with one keyboard shortcut
+- Uses Claude AI to create high-quality, concise flashcards
+- Edit flashcards before exporting
+- Export directly to Mochi
 
 ## Installation
 
@@ -19,37 +18,45 @@ A Chrome extension that allows users to select and mark text on webpages for gen
 
 ## Setup
 
-1. Get a Claude API key from Anthropic
-2. Start the local proxy server:
+1. Get a Claude API key from [Anthropic Console](https://console.anthropic.com/)
+2. Get a Mochi API key from your Mochi account
+3. Create a `.env` file in the project root (copy from `.env.example`):
+   ```
+   CLAUDE_API_KEY=sk-ant-your-api-key-here
+   MOCHI_API_KEY=your-mochi-api-key-here
+   ```
+4. Start the proxy server:
    ```
    npm install
    npm start
    ```
-3. Open the extension popup and go to Settings
-4. Enter your Claude API key and save
+5. The server must be running whenever you use the extension
 
 ## Usage
 
-1. Click the extension icon in the toolbar to open the popup
-2. Click "Enable Marking" to activate text marking
-3. Select text on any webpage - it will be automatically marked and highlighted
-4. Go to the extension popup and see your marked texts in the first tab
-5. Click "Generate Mochi Cards" to process the text with Claude AI
-6. View, edit, and export your flashcards in the second tab
+1. Start the proxy server on your local machine
+2. Select text on any webpage
+3. Press `Cmd+Shift+F` (Mac) or `Ctrl+Shift+F` (Windows) to generate flashcards
+4. Edit flashcards if needed
+5. Click "Export to Mochi" to send cards to your Mochi account
 
 ## How It Works
 
-Due to browser security restrictions, the extension cannot directly call the Claude API. Instead, it uses a local proxy server to make the API calls. The proxy server is a simple Node.js Express server that forwards the request to Claude's API and returns the response to the extension.
+1. You select text in your browser
+2. The extension captures the selected text
+3. The proxy server securely manages API keys (stored in the .env file)
+4. The server sends the text to Claude with a specialized prompt
+5. Claude creates 1-5 flashcards depending on text complexity
+6. Cards are returned as structured JSON objects
+7. You can edit cards before exporting to Mochi
+8. When exported, cards are formatted specifically for Mochi (front/back format with separator)
 
-## Required Assets
+## Security
 
-Before loading the extension, create icons for the extension:
-- `/images/icon16.png` (16×16px)
-- `/images/icon48.png` (48×48px)
-- `/images/icon128.png` (128×128px)
+API keys are stored securely in the `.env` file on your local machine, not in the browser. The browser extension never has direct access to your API keys.
 
 ## Troubleshooting
 
-- If you see a message about the proxy server not running, make sure you have started the server with `npm start`
-- If you get API errors, check that your Claude API key is valid and has sufficient credits
-- If text marking doesn't work, try refreshing the page or reloading the extension
+- If you see "Proxy server not running" - make sure you've started the server with `npm start`
+- If cards fail to generate - check your Claude API key and available credits
+- If export fails - check your Mochi API key and connection

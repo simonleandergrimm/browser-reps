@@ -1,41 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Text Marker</title>
+  <title>Flashcard Generator</title>
   <link rel="stylesheet" href="../css/popup.css">
 </head>
 <body>
   <div class="container">
-    <h1>Text Marker for Mochi Cards</h1>
-    
-    <!-- Toggle controls -->
-    <div class="controls">
-      <button id="enableMarking">Enable Marking</button>
-      <button id="disableMarking">Disable Marking</button>
-    </div>
-    <div class="status">
-      <p>Status: <span id="status">Disabled</span></p>
-    </div>
-    
     <!-- Tabs navigation -->
     <div class="tabs">
-      <button class="tab-btn active" data-tab="marked-texts">Marked Texts</button>
-      <button class="tab-btn" data-tab="generated-cards">Mochi Cards</button>
-      <button class="tab-btn" data-tab="settings">Settings</button>
-    </div>
-    
-    <!-- Marked texts tab -->
-    <div class="tab-content active" id="marked-texts">
-      <div class="marked-count">Marked texts: <span id="markedCount">0</span></div>
-      <div class="marked-list" id="markedTextsList"></div>
-      <div class="actions">
-        <button id="generateCards" disabled>Generate Mochi Cards</button>
-        <button id="clearTexts">Clear All</button>
-      </div>
+      <button class="tab-btn active" data-tab="generated-cards">Flashcards</button>
+      <button class="tab-btn" data-tab="about">About</button>
     </div>
     
     <!-- Generated cards tab -->
-    <div class="tab-content" id="generated-cards">
+    <div class="tab-content active" id="generated-cards">
       <div class="cards-count">Cards: <span id="cardsCount">0</span></div>
       <div class="cards-list" id="cardsList"></div>
       <div class="actions">
@@ -44,24 +22,14 @@
       </div>
     </div>
     
-    <!-- Settings tab -->
-    <div class="tab-content" id="settings">
-      <div class="setting-group">
-        <label for="anthropicApiKey">Claude API Key:</label>
-        <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
-        <div class="api-key-error" id="claudeApiKeyError"></div>
-      </div>
-      <div class="setting-group">
-        <label for="mochiApiKey">Mochi API Key (optional):</label>
-        <input type="password" id="mochiApiKey" placeholder="Optional - for direct export to Mochi">
-        <div class="api-key-error" id="mochiApiKeyError"></div>
-      </div>
-      <div class="setting-group checkbox">
-        <input type="checkbox" id="storeLocally" checked>
-        <label for="storeLocally">Store API keys locally</label>
-      </div>
-      <div class="actions">
-        <button id="saveSettings">Save Settings</button>
+    <!-- About tab -->
+    <div class="tab-content" id="about">
+      <div class="about-content">
+        <h2>About Flashcard Generator</h2>
+        <p>This extension uses Claude AI to generate high-quality flashcards from selected text.</p>
+        <p>API keys are securely stored on the server (not in the browser).</p>
+        <p>To set up API keys, edit the <code>.env</code> file on the server.</p>
+        <p>Make sure the proxy server is running at <code>http://localhost:3000</code></p>
       </div>
     </div>
   </div>
@@ -92,31 +60,7 @@
     </div>
   </div>
   
-  <!-- Export modal -->
-  <div id="exportModal" class="modal">
-    <div class="modal-content">
-      <span class="close">&times;</span>
-      <h2>Export Cards</h2>
-      <div class="export-options">
-        <div class="export-option" id="exportMarkdown">
-          <h3>Export as Markdown</h3>
-          <p>Download a markdown file with all cards</p>
-        </div>
-        <div class="export-option" id="exportMochi">
-          <h3>Export to Mochi</h3>
-          <p>Send cards directly to your Mochi account</p>
-        </div>
-      </div>
-      <div id="exportStatus" style="margin-top: 15px; text-align: center;"></div>
-      <div class="modal-actions">
-        <button id="confirmExport">Export</button>
-        <button id="cancelExport">Cancel</button>
-      </div>
-    </div>
-  </div>
-  
   <script src="../js/claude-api.js"></script>
-  <script src="../js/mochi-api.js"></script>
   <script src="../js/popup.js"></script>
 </body>
 </html>

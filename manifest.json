@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Text Marker for Mochi Cards",
-  "version": "1.0",
-  "description": "Select and mark text on webpages to generate Mochi flashcards using Claude AI",
+  "name": "Flashcard Generator for Mochi",
+  "version": "1.1",
+  "description": "Select text on webpages and generate Mochi flashcards using Claude AI with a keyboard shortcut",
   "permissions": ["activeTab", "storage", "tabs"],
   "action": {
     "default_popup": "popup/popup.html",
@@ -18,8 +18,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["js/content.js"],
-      "css": ["css/content.css"]
+      "js": ["js/content.js"]
     }
   ],
   "commands": {

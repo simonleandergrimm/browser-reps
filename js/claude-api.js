@@ -1,74 +1,27 @@
 /**
  * Claude API client for the Text Marker extension
  *
- * Handles API key management and Claude API integration
+ * Handles card generation using Claude API via proxy server
  */
 
-// Local storage key for API keys
-const API_KEY_STORAGE_KEY = "text_marker_api_key";
 const SERVER_URL = "http://localhost:3000"; // Local proxy server URL
 
 /**
- * Retrieves stored API keys from chrome.storage
- * @returns {Promise<Object>} Object containing API keys
+ * Checks if the proxy server is running
+ * @returns {Promise<boolean>} Whether server is available
  */
-function getStoredApiKeys() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get([API_KEY_STORAGE_KEY], function(result) {
-      resolve(result[API_KEY_STORAGE_KEY] || { anthropicApiKey: null, mochiApiKey: null });
+async function isProxyServerRunning() {
+  try {
+    const response = await fetch(`${SERVER_URL}/`, { 
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-cache'
     });
-  });
-}
-
-/**
- * Stores API keys in chrome.storage
- * @param {string} anthropicApiKey - Claude API key
- * @param {string} mochiApiKey - Mochi API key
- * @param {boolean} storeLocally - Whether to store keys locally
- * @returns {Promise<boolean>} Success status
- */
-function storeApiKeys(anthropicApiKey, mochiApiKey, storeLocally = true) {
-  return new Promise((resolve) => {
-    if (storeLocally) {
-      chrome.storage.local.set({[API_KEY_STORAGE_KEY]: { anthropicApiKey, mochiApiKey }}, function() {
-        resolve(true);
-      });
-    } else {
-      chrome.storage.local.remove([API_KEY_STORAGE_KEY], function() {
-        resolve(true);
-      });
-    }
-  });
-}
-
-/**
- * Validates format of Anthropic API key
- * @param {string} key - API key to validate
- * @returns {boolean} Whether key appears valid
- */
-function validateAnthropicApiKey(key) {
-  return key && key.startsWith('sk-ant-') && key.length > 20;
-}
-
-/**
- * Validates format of Mochi API key (basic validation)
- * @param {string} key - API key to validate
- * @returns {boolean} Whether key appears valid
- */
-function validateMochiApiKey(key) {
-  // Mochi keys should be non-empty and reasonably long
-  // Return true for empty keys (since Mochi API key is optional)
-  if (!key) return true;
-  return key.length > 10;
-}
-
-/**
- * Checks if API key is configured
- * @returns {Promise<boolean>} Whether key is available
- */
-async function hasApiKey() {
-  const keys = await getStoredApiKeys();
-  return !!keys.anthropicApiKey;
+    return response.ok;
+  } catch (error) {
+    console.log('Proxy server is not running:', error);
+    return false;
+  }
 }
 
 /**
@@ -155,57 +108,9 @@ function parseClaudeResponse(responseData) {
     }
   }
 
-  // Fallback: If JSON parsing fails, create a basic fallback card
-  console.warn('Could not parse any cards from Claude response, using fallback');
-  return [{
-    front: "What are the key concepts from this text?",
-    back: responseText.length > 300
-      ? responseText.substring(0, 300) + "..."
-      : responseText,
-    deck: "General"
-  }];
-}
-
-/**
- * Generate example cards as a fallback
- */
-function generateExampleCards(text) {
-  const excerpt = text.length > 50 ? text.substring(0, 50) + "..." : text;
-  return [
-    {
-      front: `What are the key concepts from: "${excerpt}"?`,
-      back: "This text discusses important concepts related to the topic. The main points include understanding the context, analyzing the information, and drawing conclusions.",
-      deck: "General"
-    },
-    {
-      front: `How would you summarize: "${excerpt}"?`,
-      back: "The text provides an overview of the subject matter, highlighting relevant details and explaining the significance in the broader context.",
-      deck: "Summary"
-    },
-    {
-      front: `What questions might arise from: "${excerpt}"?`,
-      back: "1. How does this information relate to the broader field?\n2. What evidence supports these claims?\n3. What are the practical applications of this knowledge?",
-      deck: "Questions"
-    }
-  ];
-}
-
-/**
- * Checks if the proxy server is running
- * @returns {Promise<boolean>} Whether server is available
- */
-async function isProxyServerRunning() {
-  try {
-    const response = await fetch(`${SERVER_URL}/`, { 
-      method: 'GET',
-      mode: 'cors',
-      cache: 'no-cache'
-    });
-    return response.ok;
-  } catch (error) {
-    console.log('Proxy server is not running:', error);
-    return false;
-  }
+  // If all parsing fails, throw an error
+  console.warn('Could not parse any cards from Claude response');
+  throw new Error('Could not parse flashcards from Claude response. Please try again with different text.');
 }
 
 /**
@@ -215,14 +120,6 @@ async function isProxyServerRunning() {
  */
 async function generateCardsWithClaude(text) {
   try {
-    // Get stored API key
-    const { anthropicApiKey } = await getStoredApiKeys();
-
-    // Check if we have an API key
-    if (!anthropicApiKey) {
-      throw new Error('No Claude API key available. Please add your API key in the extension settings.');
-    }
-
     const truncatedText = truncateText(text);
     console.log('Generating cards for text:', truncatedText.substring(0, 100) + '...');
     
@@ -230,23 +127,53 @@ async function generateCardsWithClaude(text) {
     const serverRunning = await isProxyServerRunning();
     
     if (!serverRunning) {
-      console.log('Proxy server is not running, using example cards');
-      alert('The proxy server is not running. Please start the server by running:\n\n' +
-            'npm install\nnpm start\n\n' +
-            'In the meantime, example cards will be shown.');
-      return generateExampleCards(text);
+      console.log('Proxy server is not running');
+      throw new Error('The proxy server is not running. Please start the server by running:\n\n' +
+            'npm install\nnpm start');
     }
     
-    // Send the request through our proxy server
-    console.log('Sending request to proxy server');
+    // Create the specific prompt for Claude
+    const cardGenerationPrompt = `Guidelines for creating excellent flashcards:
+• Be EXTREMELY concise - answers should be 1-2 sentences maximum!
+• Focus on core concepts, relationships, and techniques rather than trivia or isolated facts
+• Break complex ideas into smaller, atomic concepts
+• Ensure each card tests one specific idea (atomic)
+• Front of card should ask a specific question that prompts recall
+• Back of card should provide the shortest possible complete answer
+• CRITICAL: Keep answers as brief as possible while maintaining accuracy - aim for 10-25 words max
+• When referencing the author or source, use their specific name rather than general phrases like "the author" or "this text" which won't make sense months later when the user is reviewing the cards
+• Try to cite the author or the source when discussing something that is not an established concept but rather a new take or theory or prediction.
+• The questions should be precise and unambiguously exclude alternative correct answers
+• The questions should encode ideas from multiple angles
+• Avoid yes/no question, or, in general, questions that admit a binary answer
+• Avoid unordered lists of items (especially if they contain many items)
+• If quantities are involved, they should be relative, or the unit of measure should be specified in the question
+
+CRITICAL: You MUST ALWAYS output your response as a valid JSON array of card objects. NEVER provide any prose, explanation or markdown formatting.
+
+Each card object must have the following structure:
+{
+  "front": "The question or prompt text goes here",
+  "back": "The answer or explanation text goes here",
+  "deck": "General"
+}
+
+Generate between 1-5 cards depending on the complexity and amount of content in the highlighted text.
+Your response MUST BE ONLY valid JSON - no introduction, no explanation, no markdown formatting.
+
+Here is the text to create flashcards from:
+${truncatedText}`;
+
+    console.log('Sending request to proxy server with custom prompt');
+    
+    // Send the request through our proxy server (no longer sending API key)
     const response = await fetch(`${SERVER_URL}/proxy/claude`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        text: truncatedText,
-        apiKey: anthropicApiKey
+        text: cardGenerationPrompt // Use our custom prompt instead of just the text
       })
     });
     
@@ -264,28 +191,12 @@ async function generateCardsWithClaude(text) {
 }
 
 /**
- * NOTE: This function is now moved to mochi-api.js
- * This is just a wrapper to avoid breaking existing code
+ * Exports cards to Mochi using the server proxy
  * @param {Array} cards - Array of card objects to export 
  * @returns {Promise<Object>} Response status
  */
 async function exportCardsToMochi(cards) {
-  // Check if MochiApi is available in the global scope
-  if (typeof MochiApi !== 'undefined' && MochiApi.exportCardsToMochi) {
-    console.log('Using MochiApi.exportCardsToMochi from mochi-api.js');
-    return MochiApi.exportCardsToMochi(cards);
-  }
-  
-  // Fallback implementation if MochiApi is not available
   try {
-    // Get stored API key
-    const { mochiApiKey } = await getStoredApiKeys();
-
-    // Check if we have an API key
-    if (!mochiApiKey) {
-      throw new Error('No Mochi API key available. Please add your API key in the extension settings.');
-    }
-
     // Check if our proxy server is running
     const serverRunning = await isProxyServerRunning();
     
@@ -293,7 +204,7 @@ async function exportCardsToMochi(cards) {
       throw new Error('The proxy server is not running. Please start the server to export to Mochi.');
     }
     
-    // Send the request through our proxy server
+    // Send the request through our proxy server (no longer sending API key)
     console.log('Sending request to Mochi API via proxy server');
     const response = await fetch(`${SERVER_URL}/proxy/mochi`, {
       method: 'POST',
@@ -301,8 +212,7 @@ async function exportCardsToMochi(cards) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        cards,
-        apiKey: mochiApiKey
+        cards
       })
     });
     
@@ -321,11 +231,7 @@ async function exportCardsToMochi(cards) {
 
 // Export functions
 class ClaudeApi {
-  static getStoredApiKeys = getStoredApiKeys;
-  static storeApiKeys = storeApiKeys;
-  static validateAnthropicApiKey = validateAnthropicApiKey;
-  static validateMochiApiKey = validateMochiApiKey;
-  static hasApiKey = hasApiKey;
+  static isProxyServerRunning = isProxyServerRunning;
   static generateCardsWithClaude = generateCardsWithClaude;
   static exportCardsToMochi = exportCardsToMochi;
 }

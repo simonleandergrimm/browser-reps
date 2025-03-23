@@ -1,14 +1,15 @@
 body {
-  width: 500px; /* Increased from 400px */
-  max-height: 700px; /* Increased from 600px */
-  font-family: Arial, sans-serif;
+  width: 550px; /* Increased for more space */
+  max-height: 700px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   margin: 0;
   padding: 0;
   overflow-y: auto;
+  background-color: #fafafa;
 }
 
 .container {
-  padding: 15px;
+  padding: 15px 20px;
 }
 
 h1 {
@@ -19,10 +20,32 @@ h1 {
 }
 
 /* Controls */
-.controls {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
+.instructions {
+  background-color: #f5f9ff;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 15px;
+  border: 1px solid #e1effe;
+}
+
+.instructions p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.instructions kbd {
+  background-color: #edf2f7;
+  border: 1px solid #cbd5e0;
+  border-radius: 3px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.2);
+  color: #1a202c;
+  display: inline-block;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 5px;
+  vertical-align: middle;
 }
 
 button {
@@ -44,50 +67,41 @@ button:disabled {
   cursor: not-allowed;
 }
 
-#enableMarking {
-  background-color: #4caf50;
-  color: white;
-}
-
-#disableMarking {
-  background-color: #f44336;
-  color: white;
-}
-
-.status {
-  margin-bottom: 15px;
-}
-
-.enabled {
-  color: #4caf50;
-  font-weight: bold;
-}
-
-.disabled {
-  color: #f44336;
-  font-weight: bold;
-}
-
 /* Tabs */
 .tabs {
   display: flex;
-  border-bottom: 1px solid #ccc;
-  margin-bottom: 15px;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 20px;
+  background-color: white;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
 }
 
 .tab-btn {
-  padding: 8px 15px;
+  padding: 10px 20px;
   background: none;
   border: none;
-  border-bottom: 3px solid transparent;
+  border-bottom: 2px solid transparent;
   border-radius: 0;
   cursor: pointer;
   font-weight: normal;
+  color: #757575;
+  letter-spacing: 0.3px;
+  transition: all 0.2s ease;
+  flex: 1;
+  text-align: center;
+}
+
+.tab-btn:hover {
+  background-color: #f5f5f5;
+  color: #333;
 }
 
 .tab-btn.active {
   border-bottom-color: #4285f4;
-  font-weight: bold;
+  font-weight: 500;
+  color: #4285f4;
+  background-color: #f8f9fa;
 }
 
 .tab-content {
@@ -100,16 +114,20 @@ button:disabled {
 
 /* Marked texts */
 .marked-count, .cards-count {
-  margin-bottom: 10px;
-  font-weight: bold;
+  margin-bottom: 8px;
+  font-weight: normal;
+  font-size: 12px;
+  color: #666;
+  text-align: right;
 }
 
 .marked-list, .cards-list {
-  max-height: 400px; /* Increased from 300px */
+  max-height: 500px; /* Increased to give more space for cards */
   overflow-y: auto;
   margin-bottom: 15px;
-  border: 1px solid #eee;
+  border: none;
   border-radius: 4px;
+  padding-top: 10px;
 }
 
 .marked-item, .card-item {
@@ -119,17 +137,46 @@ button:disabled {
 }
 
 .card-item {
-  transition: background-color 0.2s ease;
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  margin-bottom: 8px;
-  padding: 15px 10px;
+  transition: all 0.2s ease;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+  margin-bottom: 12px;
+  padding: 18px 14px;
   border: 1px solid #e0e0e0;
+  background-color: white;
 }
 
 .card-item:hover {
-  background-color: #f5f9ff;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+  background-color: #fafafa;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  transform: translateY(-1px);
+}
+
+/* Special card styles */
+.loading-card {
+  background-color: #e3f2fd; /* Light blue background */
+  border-left: 4px solid #2196F3;
+  animation: pulse 1.5s infinite alternate;
+}
+
+.loading-card .card-front {
+  color: #0d47a1;
+  font-weight: bold;
+}
+
+.error-card {
+  background-color: #ffebee; /* Light red background */
+  border-left: 4px solid #f44336;
+}
+
+.error-card .card-front {
+  color: #b71c1c;
+  font-weight: bold;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.8; }
+  100% { opacity: 1; }
 }
 
 .marked-item:last-child, .card-item:last-child {
@@ -138,52 +185,55 @@ button:disabled {
 
 .marked-text, .card-front {
   font-weight: bold;
-  margin-bottom: 8px;
-  font-size: 14px;
-  color: #1a73e8;
+  margin-bottom: 12px;
+  font-size: 15px;
+  color: #333;
+  line-height: 1.4;
 }
 
 .marked-source, .card-deck {
   font-size: 12px;
-  color: #666;
+  color: #888;
   margin-top: 8px;
+  font-style: italic;
 }
 
 .card-back {
-  font-size: 13px;
-  color: #333;
-  margin: 10px 0;
-  line-height: 1.4; /* Improved readability */
+  font-size: 14px;
+  color: #505050;
+  margin: 12px 0;
+  line-height: 1.5; /* Improved readability */
   max-height: 300px;
   overflow-y: auto;
   background-color: #f9f9f9;
-  padding: 8px;
+  padding: 12px;
   border-radius: 4px;
+  border-left: 3px solid #e0e0e0;
 }
 
 .remove-btn {
   position: absolute;
   top: 8px;
   right: 8px;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background-color: #f44336;
-  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background-color: #e0e0e0;
+  color: #666;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 14px;
   padding: 0;
   line-height: 1;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  border: none;
   transition: all 0.2s ease;
   z-index: 10; /* Ensure it's above card content */
 }
 
 .remove-btn:hover {
-  background-color: #d32f2f;
-  transform: scale(1.1);
+  background-color: #cccccc;
+  color: #333;
 }
 
 .edit-btn {
@@ -192,6 +242,35 @@ button:disabled {
   background-color: #4285f4;
   color: white;
   margin-right: 25px;
+}
+
+/* About tab styling */
+.about-content {
+  background-color: white;
+  padding: 15px;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.about-content h2 {
+  color: #333;
+  font-size: 18px;
+  margin-top: 0;
+  margin-bottom: 15px;
+}
+
+.about-content p {
+  margin-bottom: 12px;
+  line-height: 1.5;
+  color: #555;
+}
+
+.about-content code {
+  background-color: #f0f0f0;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 13px;
 }
 
 .empty-message {

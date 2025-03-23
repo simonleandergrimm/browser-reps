@@ -1,4 +1,5 @@
 // Simple proxy server for Claude API and Mochi API
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -6,17 +7,44 @@ const bodyParser = require('body-parser');
 const app = express();
 const PORT = 3000;
 
+// Get API keys from environment variables
+const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
+const MOCHI_API_KEY = process.env.MOCHI_API_KEY;
+
 // Enable CORS for extension requests
 app.use(cors());
 app.use(bodyParser.json());
 
+// Verify API keys are available
+app.use((req, res, next) => {
+  // Only check for Claude API routes
+  if (req.path === '/proxy/claude' && !CLAUDE_API_KEY) {
+    console.error('Claude API key not found in environment variables');
+    return res.status(500).json({ 
+      error: 'Claude API key not configured. Please set CLAUDE_API_KEY in your .env file.' 
+    });
+  }
+  
+  // Only check for Mochi API routes
+  if ((req.path === '/proxy/mochi' || req.path === '/proxy/mochi/decks') && !MOCHI_API_KEY) {
+    console.error('Mochi API key not found in environment variables');
+    return res.status(500).json({ 
+      error: 'Mochi API key not configured. Please set MOCHI_API_KEY in your .env file.' 
+    });
+  }
+  
+  next();
+});
+
 // Endpoint to proxy Claude API requests
 app.post('/proxy/claude', async (req, res) => {
   try {
-    const { text, apiKey } = req.body;
+    const { text } = req.body;
+    // Use API key from environment instead of request
+    const apiKey = CLAUDE_API_KEY;
     
-    if (!text || !apiKey) {
-      return res.status(400).json({ error: 'Missing required parameters: text and apiKey' });
+    if (!text) {
+      return res.status(400).json({ error: 'Missing required parameter: text' });
     }
     
     console.log('Proxying request to Claude API');
@@ -65,10 +93,12 @@ Format your response as a JSON array of objects: [{"front": "Question?", "back":
 // Endpoint to proxy Mochi API requests
 app.post('/proxy/mochi', async (req, res) => {
   try {
-    const { cards, apiKey } = req.body;
+    const { cards } = req.body;
+    // Use API key from environment instead of request
+    const apiKey = MOCHI_API_KEY;
     
-    if (!cards || !apiKey) {
-      return res.status(400).json({ error: 'Missing required parameters: cards and apiKey' });
+    if (!cards) {
+      return res.status(400).json({ error: 'Missing required parameter: cards' });
     }
     
     console.log('Proxying request to Mochi API');
@@ -80,7 +110,19 @@ app.post('/proxy/mochi', async (req, res) => {
     // Mochi API expects a different format: individual cards with 'content' and 'deck-id' fields
     console.log('Preparing cards for Mochi API...');
     
-    // First, get the user's decks to find a valid deck ID
+    // First, validate that the cards are in the expected JSON format
+    if (!Array.isArray(cards)) {
+      throw new Error('Invalid card data format: cards must be an array');
+    }
+    
+    // Validate each card has the required properties
+    for (const card of cards) {
+      if (!card.front || !card.back) {
+        throw new Error('Invalid card data: each card must have front and back properties');
+      }
+    }
+    
+    // Next, get the user's decks to find a valid deck ID
     console.log('Fetching user decks from Mochi...');
     const decksResponse = await fetch('https://app.mochi.cards/api/decks/', {
       method: 'GET',
@@ -236,11 +278,8 @@ app.post('/proxy/mochi', async (req, res) => {
 // Endpoint to fetch Mochi decks
 app.get('/proxy/mochi/decks', async (req, res) => {
   try {
-    const { apiKey } = req.query;
-    
-    if (!apiKey) {
-      return res.status(400).json({ error: 'Missing required parameter: apiKey' });
-    }
+    // Use API key from environment instead of request
+    const apiKey = MOCHI_API_KEY;
     
     console.log('Fetching Mochi decks');
     
@@ -273,13 +312,33 @@ app.get('/proxy/mochi/decks', async (req, res) => {
 
 // Health check endpoint
 app.get('/', (req, res) => {
-  res.send('API Proxy Server is running');
+  const claudeStatus = CLAUDE_API_KEY ? 'configured' : 'missing';
+  const mochiStatus = MOCHI_API_KEY ? 'configured' : 'missing';
+  
+  res.send(`
+    <h1>API Proxy Server is running</h1>
+    <p>Status:</p>
+    <ul>
+      <li>Claude API: <strong>${claudeStatus}</strong></li>
+      <li>Mochi API: <strong>${mochiStatus}</strong></li>
+    </ul>
+    <p>If API keys are missing, please create a .env file with your keys.</p>
+  `);
 });
 
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  console.log('To start using the proxy with your extension, run:');
-  console.log('npm install express cors body-parser');
-  console.log('node server.js');
+  console.log('API Key Status:');
+  console.log(`- Claude API: ${CLAUDE_API_KEY ? 'Configured ✅' : 'Missing ❌'}`);
+  console.log(`- Mochi API: ${MOCHI_API_KEY ? 'Configured ✅' : 'Missing ❌'}`);
+  
+  if (!CLAUDE_API_KEY || !MOCHI_API_KEY) {
+    console.log('\nTo configure API keys:');
+    console.log('1. Create a .env file in the project root');
+    console.log('2. Add the following lines:');
+    console.log('   CLAUDE_API_KEY=sk-ant-your-api-key-here');
+    console.log('   MOCHI_API_KEY=your-mochi-api-key-here');
+    console.log('3. Restart the server');
+  }
 });

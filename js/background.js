@@ -1,7 +1,6 @@
-// Background script for Text Marker extension
+// Background script for Flashcard Generator extension
 
-// Store data for marked text and generated cards
-let markedTexts = [];
+// Store data for generated cards
 let generatedCards = [];
 
 console.log('Background script initialized');
@@ -9,9 +8,8 @@ console.log('Background script initialized');
 // Debug function to log current state
 function logState() {
   console.log('Current state:', {
-    markedTextsCount: markedTexts.length,
-    markedTexts: markedTexts,
-    generatedCardsCount: generatedCards.length
+    generatedCardsCount: generatedCards.length,
+    generatedCards: generatedCards
   });
 }
 
@@ -19,97 +17,57 @@ function logState() {
 chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
   console.log('Background received message:', message);
   
-  if (message.action === 'processMarkedText') {
-    // Store the marked text
-    const newItem = {
+  if (message.action === 'processSelectedText') {
+    // Store the selected text info for potential use
+    const textInfo = {
       text: message.text,
       url: sender && sender.tab ? sender.tab.url : 'unknown',
       title: sender && sender.tab ? sender.tab.title : 'Unknown page',
       timestamp: new Date().toISOString()
     };
     
-    console.log('Storing new marked text:', newItem);
-    markedTexts.push(newItem);
+    console.log('Processing selected text:', textInfo);
     
-    // Store in local storage as backup
-    chrome.storage.local.set({markedTexts: markedTexts}, function() {
-      console.log('Marked texts saved to storage, count:', markedTexts.length);
-    });
-    
-    // Check if we should immediately create cards for this text
+    // If createCards flag is set, automatically generate cards
     if (message.createCards) {
-      console.log('Auto-generating cards for the marked text...');
+      console.log('Auto-generating cards for the selected text...');
+      
+      // Make sure we have enough text to generate cards
+      if (!message.text || message.text.length < 10) {
+        console.warn('Text too short for generating cards');
+        sendResponse({ 
+          success: false, 
+          error: 'Selected text is too short for generating flashcards' 
+        });
+        return true;
+      }
       
       // We'll wait for the popup to do the actual processing,
       // since that's where the Claude API client is loaded
-      chrome.storage.local.set({autoGenerateCards: true, lastMarkedTextIndex: markedTexts.length - 1}, function() {
+      chrome.storage.local.set({
+        autoGenerateCards: true, 
+        selectedText: message.text,
+        selectedTextInfo: textInfo
+      }, function() {
         console.log('Set auto-generate flag for the popup');
+        
+        // Send a success response
+        sendResponse({ success: true });
+        
+        // After a delay, open the popup to show the results
+        setTimeout(() => {
+          try {
+            chrome.action.openPopup();
+          } catch (e) {
+            console.log('Could not open popup programmatically:', e);
+            // Can't send another response because the channel is closed
+          }
+        }, 500);
       });
       
-      // After a delay, open the popup to show the results
-      setTimeout(() => {
-        try {
-          chrome.action.openPopup();
-        } catch (e) {
-          console.log('Could not open popup programmatically:', e);
-        }
-      }, 500);
+      return true; // Keep channel open for async response
     }
     
-    // Notify the popup that new text has been marked
-    try {
-      chrome.runtime.sendMessage({
-        action: 'textMarked',
-        count: markedTexts.length,
-        autoGenerateCards: !!message.createCards
-      });
-      console.log('Notification sent to popup');
-    } catch (e) {
-      console.log('Could not notify popup, it might not be open:', e);
-    }
-    
-    logState();
-    return true;
-  } else if (message.action === 'getMarkedTexts') {
-    console.log('Sending marked texts, count:', markedTexts.length);
-    // Load from local storage to ensure persistence between restarts
-    chrome.storage.local.get(['markedTexts'], function(result) {
-      if (result.markedTexts && result.markedTexts.length > 0) {
-        // If storage has texts and background memory doesn't, restore from storage
-        if (markedTexts.length === 0) {
-          markedTexts = result.markedTexts;
-          console.log('Restored marked texts from storage, count:', markedTexts.length);
-        }
-        sendResponse({ markedTexts: result.markedTexts });
-      } else {
-        sendResponse({ markedTexts });
-      }
-    });
-    return true; // Keep channel open for async response
-  } else if (message.action === 'clearMarkedTexts') {
-    console.log('Clearing all marked texts');
-    markedTexts = [];
-    chrome.storage.local.remove(['markedTexts']);
-    sendResponse({ success: true });
-    logState();
-    return true;
-  } else if (message.action === 'setMarkedTexts') {
-    console.log('Updating marked texts list, new count:', message.texts.length);
-    markedTexts = message.texts;
-    chrome.storage.local.set({markedTexts: markedTexts});
-    sendResponse({ success: true });
-    logState();
-    return true;
-  } else if (message.action === 'removeMarkedText') {
-    console.log('Removing marked text at index:', message.index);
-    if (message.index >= 0 && message.index < markedTexts.length) {
-      markedTexts.splice(message.index, 1);
-      chrome.storage.local.set({markedTexts: markedTexts});
-      sendResponse({ success: true, markedTexts: markedTexts });
-      logState();
-    } else {
-      sendResponse({ success: false, error: 'Invalid index' });
-    }
     return true;
   } else if (message.action === 'getGeneratedCards') {
     console.log('Sending generated cards, count:', generatedCards.length);
@@ -168,20 +126,11 @@ chrome.commands.onCommand.addListener((command) => {
 
 // When extension is installed or updated
 chrome.runtime.onInstalled.addListener(function() {
-  console.log('Text Marker extension installed or updated');
+  console.log('Flashcard Generator extension installed or updated');
   
   // Initialize storage
-  chrome.storage.local.get(['markingEnabled', 'markedTexts', 'generatedCards'], function(result) {
-    if (result.markingEnabled === undefined) {
-      chrome.storage.local.set({markingEnabled: true}); // Enable marking by default
-    }
-    
-    // Restore saved texts and cards if any
-    if (result.markedTexts && result.markedTexts.length > 0) {
-      markedTexts = result.markedTexts;
-      console.log('Restored marked texts from storage on startup, count:', markedTexts.length);
-    }
-    
+  chrome.storage.local.get(['generatedCards'], function(result) {
+    // Restore saved cards if any
     if (result.generatedCards && result.generatedCards.length > 0) {
       generatedCards = result.generatedCards;
       console.log('Restored generated cards from storage on startup, count:', generatedCards.length);
