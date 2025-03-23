@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Flashcard Generator for Mochi",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Select text on webpages and generate Mochi flashcards using Claude AI with a keyboard shortcut",
   "permissions": ["activeTab", "storage", "tabs"],
   "action": {
@@ -24,15 +24,15 @@
   "commands": {
     "create-flashcards": {
       "suggested_key": {
-        "default": "Ctrl+Shift+F",
-        "mac": "Command+Shift+F"
+        "default": "Ctrl+Shift+U",
+        "mac": "Command+Shift+U"
       },
       "description": "Create flashcards from selected text"
     },
     "_execute_action": {
       "suggested_key": {
-        "default": "Ctrl+Shift+M",
-        "mac": "Command+Shift+M"
+        "default": "Alt+U",
+        "mac": "Command+U"
       },
       "description": "Open extension popup"
     }

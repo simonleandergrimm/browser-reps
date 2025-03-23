@@ -11,7 +11,7 @@
       <button class="tab-btn active" data-tab="generated-cards">Flashcards</button>
       <button class="tab-btn" data-tab="about">About</button>
     </div>
-    
+
     <!-- Generated cards tab -->
     <div class="tab-content active" id="generated-cards">
       <div class="cards-count">Cards: <span id="cardsCount">0</span></div>
@@ -21,20 +21,29 @@
         <button id="clearCards">Clear All</button>
       </div>
     </div>
-    
+
     <!-- About tab -->
     <div class="tab-content" id="about">
       <div class="about-content">
         <h2>About Flashcard Generator</h2>
         <p>This extension uses Claude AI to generate high-quality flashcards from selected text.</p>
+
+        <h3>Keyboard Shortcuts</h3>
+        <ul class="keyboard-shortcuts">
+          <li><kbd>Command+Shift+U</kbd> (Mac) / <kbd>Ctrl+Shift+U</kbd> (Windows/Linux): Generate flashcards from selected text</li>
+          <li><kbd>Command+U</kbd> (Mac) / <kbd>Alt+U</kbd> (Windows/Linux): Open extension popup</li>
+        </ul>
+        <p class="note">Note: If shortcuts aren't active, go to Chrome's extension keyboard shortcuts page at <code>chrome://extensions/shortcuts</code> and set them manually.</p>
+
+        <h3>Setup</h3>
         <p>API keys are securely stored on the server (not in the browser).</p>
         <p>To set up API keys, edit the <code>.env</code> file on the server.</p>
         <p>Make sure the proxy server is running at <code>http://localhost:3000</code></p>
       </div>
     </div>
   </div>
-  
-  
+
+
   <script src="../js/claude-api.js"></script>
   <script src="../js/popup.js"></script>
 </body>

@@ -119,11 +119,9 @@ document.addEventListener('DOMContentLoaded', async function() {
   
   // Clear cards button
   clearCardsButton.addEventListener('click', function() {
-    if (confirm('Are you sure you want to clear all generated cards?')) {
-      generatedCards = [];
-      chrome.runtime.sendMessage({action: 'clearGeneratedCards'});
-      updateCardsList();
-    }
+    generatedCards = [];
+    chrome.runtime.sendMessage({action: 'clearGeneratedCards'});
+    updateCardsList();
   });
   
   // Save edited card
@@ -215,7 +213,12 @@ document.addEventListener('DOMContentLoaded', async function() {
     cardsList.innerHTML = '';
     
     if (generatedCards.length === 0) {
-      cardsList.innerHTML = '<div class="empty-message">No cards yet. Select text on a webpage and press Cmd+Shift+F to create flashcards.</div>';
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const shortcutKey = isMac ? "Cmd+Shift+U" : "Ctrl+Shift+U";
+      cardsList.innerHTML = `<div class="empty-message">
+        <p>No cards yet.</p>
+        <p>Select text on a webpage and press <kbd>${shortcutKey}</kbd> to create flashcards.</p>
+      </div>`;
       exportCardsButton.disabled = true;
       return;
     }

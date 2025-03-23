@@ -1,15 +1,19 @@
 body {
   width: 550px; /* Increased for more space */
-  max-height: 700px;
+  height: 500px; /* Reduced height to eliminate scrollbar */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
+  overflow: hidden; /* Prevent all scrolling */
   background-color: #fafafa;
 }
 
 .container {
-  padding: 15px 20px;
+  padding: 10px 15px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 h1 {
@@ -71,14 +75,14 @@ button:disabled {
 .tabs {
   display: flex;
   border-bottom: 1px solid #e0e0e0;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
   background-color: white;
   border-radius: 4px 4px 0 0;
   overflow: hidden;
 }
 
 .tab-btn {
-  padding: 10px 20px;
+  padding: 8px 15px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
@@ -106,10 +110,18 @@ button:disabled {
 
 .tab-content {
   display: none;
+  flex: 1;
+  overflow: hidden;
 }
 
-.tab-content.active {
-  display: block;
+/* Cards tab styling */
+#generated-cards {
+  display: none;
+}
+#generated-cards.active {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 /* Marked texts */
@@ -122,12 +134,12 @@ button:disabled {
 }
 
 .marked-list, .cards-list {
-  max-height: 500px; /* Increased to give more space for cards */
+  flex: 1;
   overflow-y: auto;
-  margin-bottom: 15px;
+  margin-bottom: 10px;
   border: none;
   border-radius: 4px;
-  padding-top: 10px;
+  padding-top: 5px;
 }
 
 .marked-item, .card-item {
@@ -140,8 +152,8 @@ button:disabled {
   transition: all 0.2s ease;
   border-radius: 6px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.12);
-  margin-bottom: 12px;
-  padding: 18px 14px;
+  margin-bottom: 10px;
+  padding: 12px 12px;
   border: 1px solid #e0e0e0;
   background-color: white;
 }
@@ -185,11 +197,11 @@ button:disabled {
 
 .marked-text, .card-front {
   font-weight: bold;
-  margin-bottom: 12px;
-  font-size: 15px;
+  margin-bottom: 8px;
+  font-size: 14px;
   color: #333;
   line-height: 1.4;
-  min-height: 24px;
+  min-height: 20px;
   padding: 4px;
   border-radius: 4px;
   transition: background-color 0.2s;
@@ -237,14 +249,14 @@ button:disabled {
 }
 
 .card-back {
-  font-size: 14px;
+  font-size: 13px;
   color: #505050;
-  margin: 12px 0;
-  line-height: 1.5; /* Improved readability */
-  max-height: 300px;
+  margin: 8px 0;
+  line-height: 1.4; /* Slightly reduced */
+  max-height: 200px;
   overflow-y: auto;
   background-color: #f9f9f9;
-  padding: 12px;
+  padding: 8px;
   border-radius: 4px;
   border-left: 3px solid #e0e0e0;
   transition: background-color 0.2s;
@@ -293,11 +305,20 @@ button:disabled {
 }
 
 /* About tab styling */
+#about {
+  display: none;
+}
+#about.active {
+  display: flex;
+}
+
 .about-content {
   background-color: white;
   padding: 15px;
   border-radius: 6px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  flex: 1;
+  overflow-y: auto;
 }
 
 .about-content h2 {
@@ -313,6 +334,15 @@ button:disabled {
   color: #555;
 }
 
+.about-content p.note {
+  background-color: #fff8e1;
+  padding: 8px 10px;
+  border-left: 3px solid #ffc107;
+  border-radius: 3px;
+  font-size: 12px;
+  margin-top: 5px;
+}
+
 .about-content code {
   background-color: #f0f0f0;
   padding: 2px 5px;
@@ -321,17 +351,68 @@ button:disabled {
   font-size: 13px;
 }
 
+.about-content h3 {
+  font-size: 16px;
+  margin-top: 15px;
+  margin-bottom: 8px;
+  color: #4285f4;
+}
+
+.keyboard-shortcuts {
+  list-style-type: none;
+  padding-left: 0;
+  margin-bottom: 15px;
+}
+
+.keyboard-shortcuts li {
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.keyboard-shortcuts kbd {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.1);
+  color: #333;
+  display: inline-block;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 5px;
+  margin: 0 2px;
+}
+
 .empty-message {
   padding: 15px;
   color: #666;
-  font-style: italic;
   text-align: center;
+}
+
+.empty-message p {
+  margin: 8px 0;
+}
+
+.empty-message kbd {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.1);
+  color: #333;
+  display: inline-block;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 5px;
+  margin: 0 2px;
 }
 
 .actions {
   display: flex;
   justify-content: space-between;
-  margin-top: 10px;
+  margin-top: 5px;
+  margin-bottom: 5px;
+  flex-shrink: 0;
 }
 
 #generateCards, #exportCards, #saveSettings {
