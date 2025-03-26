@@ -1,6 +1,6 @@
 # Flashcard Generator Chrome Extension
 
-A Chrome extension that generates flashcards from selected webpage text using Claude AI, and exports them to Mochi.
+A Chrome extension that generates flashcards from selected webpage text using Claude AI, and exports them to Mochi. Entirely vibe-coded, buyer beware.
 
 ## Features
 
