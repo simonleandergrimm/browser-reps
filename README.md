@@ -36,7 +36,7 @@ A Chrome extension that generates flashcards from selected webpage text using Cl
 
 1. Start the proxy server on your local machine
 2. Select text on any webpage
-3. Press `Cmd+Shift+F` (Mac) or `Ctrl+Shift+F` (Windows) to generate flashcards
+3. Press `Cmd+Shift+`U (Mac) or `Ctrl+Shift+U` (Windows) to generate flashcards
 4. Edit flashcards if needed
 5. Click "Export to Mochi" to send cards to your Mochi account
 
